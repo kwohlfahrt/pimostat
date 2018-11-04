@@ -3,8 +3,6 @@ extern crate clap;
 use clap::{Arg, App};
 
 use std::net::TcpListener;
-use std::io::Read;
-use std::str;
 
 include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
 
@@ -17,13 +15,15 @@ fn main() {
 
     let port: u16 = matches.value_of("port").unwrap().parse().unwrap();
     let listener = TcpListener::bind(("localhost", port)).unwrap();
+    let read_opts = capnp::message::ReaderOptions::new();
 
     for stream in listener.incoming() {
-        let mut buffer = Vec::new();
         let mut stream = stream.unwrap();
-        stream.read_to_end(&mut buffer).unwrap();
 
-        let data = str::from_utf8(&buffer).unwrap();
-        println!("Read {}", data);
+        let reader = capnp::serialize::read_message(&mut stream, read_opts).unwrap();
+        let msg = reader.get_root::<temperature::Reader>().unwrap();
+        let temp = msg.get_value();
+
+        println!("Read {}", temp);
     }
 }

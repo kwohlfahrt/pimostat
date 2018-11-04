@@ -3,7 +3,6 @@ extern crate clap;
 use clap::{Arg, App};
 
 use std::net::TcpStream;
-use std::io::Write;
 
 include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
 
@@ -18,7 +17,11 @@ fn main() {
     let mut stream = TcpStream::connect(("localhost", port))
         .unwrap();
 
-    let data = "foo";
-    println!("Writing {}", data);
-    stream.write_all(data.as_bytes()).unwrap();
+    let mut builder = capnp::message::Builder::new_default();
+    {
+        let mut msg = builder.init_root::<temperature::Builder>();
+        msg.set_value(21.5);
+    }
+
+    capnp::serialize::write_message(&mut stream, &builder).unwrap();
 }
