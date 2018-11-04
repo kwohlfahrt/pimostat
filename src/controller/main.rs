@@ -1,4 +1,6 @@
 extern crate capnp;
+extern crate capnp_rpc;
+
 extern crate clap;
 use clap::{Arg, App};
 
@@ -6,7 +8,7 @@ use std::net::TcpListener;
 use std::io::Read;
 
 #[allow(dead_code)]
-mod temperature {
+mod temperature_capnp {
     include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
 }
 
@@ -18,9 +20,17 @@ struct Config {
 fn read_temperature<R: Read>(stream: &mut R) -> capnp::Result<f32> {
     let read_opts = capnp::message::ReaderOptions::new();
     let reader = capnp::serialize::read_message(stream, read_opts).unwrap();
-    let msg = reader.get_root::<temperature::sensor_state::Reader>().unwrap();
+    let msg = reader.get_root::<temperature_capnp::sensor_state::Reader>().unwrap();
 
     Ok(msg.get_value())
+}
+
+fn update(on: &mut bool, temperature: f32, cfg: &Config) {
+    if temperature > cfg.target {
+        *on = false;
+    } else if temperature < (cfg.target - cfg.hysteresis) {
+        *on = true;
+    }
 }
 
 fn main() -> std::io::Result<()> {
@@ -46,15 +56,10 @@ fn main() -> std::io::Result<()> {
 
     let mut on: bool = false;
 
+    // Listen
     for stream in listener.incoming() {
         let temp = read_temperature(&mut stream?).unwrap();
-
-        if temp > cfg.target {
-            on = false;
-        } else if temp < (cfg.target - cfg.hysteresis) {
-            on = true;
-        }
-
+        update(&mut on, temp, &cfg);
         println!("Thermostat is {}", if on {"On"} else {"Off"});
     }
 

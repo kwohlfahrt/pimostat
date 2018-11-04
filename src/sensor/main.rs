@@ -1,11 +1,13 @@
 extern crate capnp;
+extern crate capnp_rpc;
+
 extern crate clap;
 use clap::{Arg, App};
 
 use std::net::TcpStream;
 
 #[allow(dead_code)]
-mod temperature {
+mod temperature_capnp {
     include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
 }
 
@@ -29,7 +31,7 @@ fn main() {
 
     let mut builder = capnp::message::Builder::new_default();
     {
-        let mut msg = builder.init_root::<temperature::sensor_state::Builder>();
+        let mut msg = builder.init_root::<temperature_capnp::sensor_state::Builder>();
         msg.set_value(temperature);
     }
 
