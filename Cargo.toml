@@ -1,0 +1,11 @@
+[package]
+name = "pimostat"
+version = "0.1.0"
+authors = ["Kai Wohlfahrt <kai.wohlfahrt@gmail.com>"]
+build = "build.rs"
+
+[dependencies]
+capnp = "0.9"
+
+[build-dependencies]
+capnpc = "0.9"
