@@ -8,6 +8,7 @@ build = "build.rs"
 capnp = "0.9"
 capnp-rpc = "0.9"
 clap = "2.32"
+futures = "0.1.25"
 
 [build-dependencies]
 capnpc = "0.9"
