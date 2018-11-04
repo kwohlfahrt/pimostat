@@ -11,16 +11,23 @@ fn main() {
         .arg(Arg::with_name("port")
              .required(true)
              .index(1))
+        .arg(Arg::with_name("temperature")
+             .required(true)
+             .index(2))
         .get_matches();
 
-    let port: u16 = matches.value_of("port").unwrap().parse().unwrap();
+    let port: u16 = matches.value_of("port").unwrap()
+        .parse().unwrap();
     let mut stream = TcpStream::connect(("localhost", port))
         .unwrap();
+
+    let temperature: f32 = matches.value_of("temperature").unwrap()
+        .parse().unwrap();
 
     let mut builder = capnp::message::Builder::new_default();
     {
         let mut msg = builder.init_root::<temperature::Builder>();
-        msg.set_value(21.5);
+        msg.set_value(temperature);
     }
 
     capnp::serialize::write_message(&mut stream, &builder).unwrap();
