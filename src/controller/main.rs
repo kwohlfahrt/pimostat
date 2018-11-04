@@ -5,7 +5,10 @@ use clap::{Arg, App};
 use std::net::TcpListener;
 use std::io::Read;
 
-include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
+#[allow(dead_code)]
+mod temperature {
+    include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
+}
 
 struct Config {
     pub target: f32,
@@ -15,7 +18,7 @@ struct Config {
 fn read_temperature<R: Read>(stream: &mut R) -> capnp::Result<f32> {
     let read_opts = capnp::message::ReaderOptions::new();
     let reader = capnp::serialize::read_message(stream, read_opts).unwrap();
-    let msg = reader.get_root::<temperature::Reader>().unwrap();
+    let msg = reader.get_root::<temperature::sensor_state::Reader>().unwrap();
 
     Ok(msg.get_value())
 }

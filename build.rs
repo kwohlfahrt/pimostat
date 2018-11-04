@@ -1,8 +1,12 @@
 extern crate capnpc;
 
 fn main() {
-    capnpc::CompilerCommand::new()
-        .src_prefix("schema")
-        .file("schema/temperature.capnp")
-        .run().expect("Schema compiler command failed")
+    let schemas = ["temperature.capnp"];
+
+    for schema in schemas.iter() {
+        capnpc::CompilerCommand::new()
+            .src_prefix("schema")
+            .file(format!("schema/{}", schema))
+            .run().expect("Schema compiler command failed");
+    }
 }

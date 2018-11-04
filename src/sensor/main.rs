@@ -4,7 +4,10 @@ use clap::{Arg, App};
 
 use std::net::TcpStream;
 
-include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
+#[allow(dead_code)]
+mod temperature {
+    include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
+}
 
 fn main() {
     let matches = App::new("Thermostat Controller")
@@ -26,7 +29,7 @@ fn main() {
 
     let mut builder = capnp::message::Builder::new_default();
     {
-        let mut msg = builder.init_root::<temperature::Builder>();
+        let mut msg = builder.init_root::<temperature::sensor_state::Builder>();
         msg.set_value(temperature);
     }
 

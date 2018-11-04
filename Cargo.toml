@@ -6,14 +6,15 @@ build = "build.rs"
 
 [dependencies]
 capnp = "0.9"
+capnp-rpc = "0.9"
 clap = "2.32"
 
 [build-dependencies]
 capnpc = "0.9"
 
 [[bin]]
-name = "actor"
-path = "src/actor/main.rs"
+name = "controller"
+path = "src/controller/main.rs"
 
 [[bin]]
 name = "sensor"
