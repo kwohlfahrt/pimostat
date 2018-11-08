@@ -8,7 +8,8 @@ use futures::future::Future;
 extern crate clap;
 use clap::{Arg, App};
 
-use std::net::TcpStream;
+use std::net::SocketAddr;
+use std::net::TcpListener;
 
 #[allow(dead_code)]
 mod temperature_capnp {
@@ -38,8 +39,9 @@ fn main() {
 
     let port: u16 = matches.value_of("port").unwrap()
         .parse().unwrap();
-    let mut stream = TcpStream::connect(("localhost", port))
-        .unwrap();
+    let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
+    let listener = TcpListener::bind(&addr)
+        .expect("Failed to bind to socket");
 
     let temperature: f32 = matches.value_of("temperature").unwrap()
         .parse().unwrap();
@@ -60,5 +62,10 @@ fn main() {
         msg.set_value(temperature);
     }
 
-    capnp::serialize::write_message(&mut stream, &builder).unwrap();
+    // Listen
+    for stream in listener.incoming() {
+        let mut stream = stream.expect("Failed to accept connection");
+        capnp::serialize::write_message(&mut stream, &builder).unwrap();
+    }
+
 }
