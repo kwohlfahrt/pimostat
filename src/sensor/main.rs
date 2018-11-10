@@ -3,13 +3,18 @@ extern crate capnp_rpc;
 use capnp_rpc::pry;
 
 extern crate futures;
-use futures::future::Future;
+use futures::{Stream, Future};
+
+extern crate tokio;
+use tokio::io::AsyncRead;
+use tokio::net::TcpListener;
+// Capn'p clients are not Sync
+use tokio::runtime::current_thread;
 
 extern crate clap;
 use clap::{Arg, App};
 
 use std::net::SocketAddr;
-use std::net::TcpListener;
 
 #[allow(dead_code)]
 mod temperature_capnp {
@@ -63,9 +68,25 @@ fn main() {
     }
 
     // Listen
-    for stream in listener.incoming() {
-        let mut stream = stream.expect("Failed to accept connection");
-        capnp::serialize::write_message(&mut stream, &builder).unwrap();
-    }
+    let server = listener.incoming().for_each(|s| {
+        if let Err(e)  = s.set_nodelay(true) {
+            eprintln!("Warning: could not set nodelay ({})", e)
+        };
 
+        let (reader, writer) = s.split();
+
+        let network = capnp_rpc::twoparty::VatNetwork::new(
+            reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Server, Default::default()
+        );
+        let rpc_system = capnp_rpc::RpcSystem::new(
+            Box::new(network), Some(client.clone().client)
+        );
+        current_thread::spawn(rpc_system.map_err(
+            |e| {eprintln!("Error in RPC system ({})", e)}
+        ));
+        Ok(())
+    });
+
+    current_thread::block_on_all(server)
+        .expect("Failed to run RPC server");
 }
