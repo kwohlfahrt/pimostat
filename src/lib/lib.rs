@@ -33,6 +33,6 @@ pub mod actor_capnp {
     include!(concat!(env!("OUT_DIR"), "/actor_capnp.rs"));
 }
 
-pub mod temperature_capnp {
-    include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
+pub mod sensor_capnp {
+    include!(concat!(env!("OUT_DIR"), "/sensor_capnp.rs"));
 }

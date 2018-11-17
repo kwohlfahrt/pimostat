@@ -15,14 +15,14 @@ extern crate clap;
 use clap::{Arg, App};
 
 extern crate pimostat;
-use pimostat::{temperature_capnp};
+use pimostat::{sensor_capnp};
 
 use std::net::SocketAddr;
 
 struct Sensor (pub f32);
-impl temperature_capnp::sensor::Server for Sensor {
-    fn measure(&mut self, _: temperature_capnp::sensor::MeasureParams,
-               mut results: temperature_capnp::sensor::MeasureResults)
+impl sensor_capnp::sensor::Server for Sensor {
+    fn measure(&mut self, _: sensor_capnp::sensor::MeasureParams,
+               mut results: sensor_capnp::sensor::MeasureResults)
                -> capnp::capability::Promise<(), capnp::Error> {
         pry!(results.get().get_state()).set_value(self.0);
         capnp::capability::Promise::ok(())
@@ -49,7 +49,7 @@ fn main() {
     let temperature: f32 = matches.value_of("temperature").unwrap()
         .parse().unwrap();
 
-    let client = temperature_capnp::sensor::ToClient::new(Sensor(temperature))
+    let client = sensor_capnp::sensor::ToClient::new(Sensor(temperature))
         .from_server::<capnp_rpc::Server>();
 
     client.measure_request().send().promise.and_then(|r| {
@@ -61,7 +61,7 @@ fn main() {
 
     let mut builder = capnp::message::Builder::new_default();
     {
-        let mut msg = builder.init_root::<temperature_capnp::sensor_state::Builder>();
+        let mut msg = builder.init_root::<sensor_capnp::sensor_state::Builder>();
         msg.set_value(temperature);
     }
 

@@ -1,7 +1,7 @@
 extern crate capnpc;
 
 fn main() {
-    let schemas = ["temperature.capnp", "actor.capnp"];
+    let schemas = ["sensor.capnp", "actor.capnp"];
 
     for schema in schemas.iter() {
         capnpc::CompilerCommand::new()
