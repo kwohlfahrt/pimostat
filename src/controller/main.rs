@@ -12,12 +12,10 @@ use tokio::io::AsyncRead;
 // Capn'p clients are not Sync
 use tokio::runtime::current_thread;
 
-use std::net::SocketAddr;
+extern crate pimostat;
+use pimostat::{Error, actor_capnp};
 
-#[allow(dead_code)]
-mod actor_capnp {
-    include!(concat!(env!("OUT_DIR"), "/actor_capnp.rs"));
-}
+use std::net::SocketAddr;
 
 struct Config {
     pub target: f32,
@@ -32,35 +30,6 @@ fn update(on: &mut bool, temperature: f32, cfg: &Config) {
         *on = true;
     }
 }
-
-#[derive(Debug)]
-enum Error{
-    CapnP(capnp::Error),
-    IO(std::io::Error),
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
-        match self {
-            Error::IO(e) => write!(fmt, "IO({})", e),
-            Error::CapnP(e) => write!(fmt, "CapnP({})", e),
-        }
-    }
-}
-
-impl From<capnp::Error> for Error {
-    fn from(e: capnp::Error) -> Self {
-        Error::CapnP(e)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Error::IO(e)
-    }
-}
-
-impl std::error::Error for Error {}
 
 fn main() {
     let matches = App::new("Temperature Sensor")

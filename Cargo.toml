@@ -14,6 +14,10 @@ tokio = "0.1"
 [build-dependencies]
 capnpc = "0.9"
 
+[lib]
+name = "pimostat"
+path = "src/lib/lib.rs"
+
 [[bin]]
 name = "controller"
 path = "src/controller/main.rs"

@@ -14,12 +14,10 @@ use tokio::runtime::current_thread;
 extern crate clap;
 use clap::{Arg, App};
 
-use std::net::SocketAddr;
+extern crate pimostat;
+use pimostat::{temperature_capnp};
 
-#[allow(dead_code)]
-mod temperature_capnp {
-    include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
-}
+use std::net::SocketAddr;
 
 struct Sensor (pub f32);
 impl temperature_capnp::sensor::Server for Sensor {
