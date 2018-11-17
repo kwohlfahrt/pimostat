@@ -90,30 +90,29 @@ fn main() {
         .expect("Failed to bind to socket");
 
     let server = listener.incoming()
+        .map_err(Error::IO)
         .map(|s| {
             println!("Accepted connection");
             if let Err(e)  = s.set_nodelay(true) {
                 eprintln!("Warning: could not set nodelay ({})", e)
             };
-            let (reader, writer) = s.split();
-
+            s.split()
+        })
+        .map(|(reader, writer)| {
             let network = capnp_rpc::twoparty::VatNetwork::new(
                 reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Client, Default::default()
             );
             let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
             let actor: actor_capnp::actor::Client =
                 rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
-
             current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
-            println!("Spawned RPC system");
+
+            actor
+        }).for_each(|actor| {
             actor.toggle_request().send().promise
-        }).for_each(|r| {
-            current_thread::spawn(
-                r.map_err(|e| eprintln!("RPC error ({})", e))
-                    .map(|_| println!("Received RPC Response"))
-            );
-            Ok(())
-        }).map_err(Error::IO);
+                .map_err(Error::CapnP)
+                .map(|_| println!("Received RPC Response"))
+        });
 
     current_thread::block_on_all(server)
         .expect("Failed to run RPC client");
