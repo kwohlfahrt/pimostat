@@ -5,7 +5,7 @@ extern crate clap;
 use clap::{Arg, App};
 
 extern crate futures;
-use futures::Future;
+use futures::{Future, Stream};
 
 extern crate tokio;
 use tokio::io::AsyncRead;
@@ -15,8 +15,8 @@ use tokio::runtime::current_thread;
 use std::net::SocketAddr;
 
 #[allow(dead_code)]
-mod temperature_capnp {
-    include!(concat!(env!("OUT_DIR"), "/temperature_capnp.rs"));
+mod actor_capnp {
+    include!(concat!(env!("OUT_DIR"), "/actor_capnp.rs"));
 }
 
 struct Config {
@@ -32,6 +32,35 @@ fn update(on: &mut bool, temperature: f32, cfg: &Config) {
         *on = true;
     }
 }
+
+#[derive(Debug)]
+enum Error{
+    CapnP(capnp::Error),
+    IO(std::io::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            Error::IO(e) => write!(fmt, "IO({})", e),
+            Error::CapnP(e) => write!(fmt, "CapnP({})", e),
+        }
+    }
+}
+
+impl From<capnp::Error> for Error {
+    fn from(e: capnp::Error) -> Self {
+        Error::CapnP(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::IO(e)
+    }
+}
+
+impl std::error::Error for Error {}
 
 fn main() {
     let matches = App::new("Temperature Sensor")
@@ -57,33 +86,35 @@ fn main() {
 
     let mut _on: bool = false;
 
-    let mut runtime = current_thread::Runtime::new()
-        .expect("Failed to start runtime");
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .expect("Failed to bind to socket");
 
-    let stream = runtime.block_on(
-        tokio::net::TcpStream::connect(&addr)
-    ).expect("Failed to connect to socket");
+    let server = listener.incoming()
+        .map(|s| {
+            println!("Accepted connection");
+            if let Err(e)  = s.set_nodelay(true) {
+                eprintln!("Warning: could not set nodelay ({})", e)
+            };
+            let (reader, writer) = s.split();
 
-    if let Err(e)  = stream.set_nodelay(true) {
-        eprintln!("Warning: could not set nodelay ({})", e)
-    };
-    let (reader, writer) = stream.split();
-    let network = capnp_rpc::twoparty::VatNetwork::new(
-        reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Client, Default::default()
-    );
-    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+            let network = capnp_rpc::twoparty::VatNetwork::new(
+                reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Client, Default::default()
+            );
+            let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+            let actor: actor_capnp::actor::Client =
+                rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
-    // TODO: read about this
-    let sensor: temperature_capnp::sensor::Client =
-        rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+            current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
+            println!("Spawned RPC system");
+            actor.toggle_request().send().promise
+        }).for_each(|r| {
+            current_thread::spawn(
+                r.map_err(|e| eprintln!("RPC error ({})", e))
+                    .map(|_| println!("Received RPC Response"))
+            );
+            Ok(())
+        }).map_err(Error::IO);
 
-    runtime.spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
-
-    let result = runtime.block_on(sensor.measure_request().send().promise)
-        .expect("Error sending RPC request");
-    let temperature = result.get()
-        .expect("Error reading RPC result").get_state()
-        .expect("Error reading sensor state").get_value();
-
-    println!("Temperature is: {}", temperature);
+    current_thread::block_on_all(server)
+        .expect("Failed to run RPC client");
 }

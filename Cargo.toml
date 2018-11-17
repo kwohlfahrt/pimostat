@@ -21,3 +21,7 @@ path = "src/controller/main.rs"
 [[bin]]
 name = "sensor"
 path = "src/sensor/main.rs"
+
+[[bin]]
+name = "actor"
+path = "src/actor/main.rs"
