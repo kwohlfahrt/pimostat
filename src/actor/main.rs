@@ -57,17 +57,19 @@ fn main() {
         msg.set_type(controller_capnp::hello::Type::Actor);
     }
 
-    let rpc_system = stream.and_then(|(reader, writer)| {
-        capnp_futures::serialize::write_message(writer, builder)
-            .map_err(Error::CapnP)
-            .and_then(|(writer, _)| {
-                let network = capnp_rpc::twoparty::VatNetwork::new(
-                    reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Server, Default::default()
-                );
-                capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client))
-                    .map_err(Error::CapnP)
-            })
-    });
+    let rpc_system = stream
+        .and_then(|(reader, writer)| {
+            capnp_futures::serialize::write_message(writer, builder)
+                .map_err(Error::CapnP)
+                .map(|(writer, _)| (reader, writer))
+        })
+        .and_then(|(reader, writer)| {
+            let network = capnp_rpc::twoparty::VatNetwork::new(
+                reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Server, Default::default()
+            );
+            capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client))
+                .map_err(Error::CapnP)
+        });
 
     println!("Starting RPC system");
     current_thread::block_on_all(rpc_system)

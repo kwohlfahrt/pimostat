@@ -74,28 +74,28 @@ fn main() {
                 .map(|(reader, msg)|{
                     let value = msg.unwrap().get_root::<controller_capnp::hello::Reader>()
                         .unwrap().get_type().unwrap();
-                    (reader, value)
+                    (reader, writer, value)
                 })
-                .and_then(|(reader, hello)| {
-                    match hello {
-                        controller_capnp::hello::Type::Sensor => {
-                            unimplemented!()
-                        },
-                        controller_capnp::hello::Type::Actor => {
-                            let network = capnp_rpc::twoparty::VatNetwork::new(
-                                reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Client, Default::default()
-                            );
-                            let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-                            let actor: actor_capnp::actor::Client =
-                                rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
-                            current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
+        })
+        .and_then(|(reader, writer, hello)| {
+            match hello {
+                controller_capnp::hello::Type::Sensor => {
+                    unimplemented!()
+                },
+                controller_capnp::hello::Type::Actor => {
+                    let network = capnp_rpc::twoparty::VatNetwork::new(
+                        reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Client, Default::default()
+                    );
+                    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+                    let actor: actor_capnp::actor::Client =
+                        rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+                    current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-                            actor.toggle_request().send().promise
-                                .map_err(Error::CapnP)
-                                .map(|_| println!("Received RPC Response"))
-                        },
-                    }
-                })
+                    actor.toggle_request().send().promise
+                        .map_err(Error::CapnP)
+                        .map(|_| println!("Received RPC Response"))
+                },
+            }
         }).for_each(|_| Ok(()));
 
     current_thread::block_on_all(server)
