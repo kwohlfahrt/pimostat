@@ -80,6 +80,16 @@ fn main() {
         .and_then(|(reader, writer, hello)| {
             match hello {
                 controller_capnp::hello::Type::Sensor => {
+                    /*
+                    capnp_futures::serialize::read_message(reader, read_opts)
+                        .map_err(Error::CapnP)
+                        .map(|(reader, msg)|{
+                            let value = msg.unwrap().get_root::<sensor_capnp::sensor_state::Reader>()
+                                .unwrap().get_value();
+                            println!("Temperature is: {}", value);
+                            (reader, writer)
+                        })
+                    */
                     unimplemented!()
                 },
                 controller_capnp::hello::Type::Actor => {

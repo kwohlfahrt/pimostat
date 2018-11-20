@@ -1,13 +1,11 @@
 extern crate capnp;
 extern crate capnp_rpc;
-use capnp_rpc::pry;
 
 extern crate futures;
-use futures::{Stream, Future};
+use futures::Future;
 
 extern crate tokio;
 use tokio::io::AsyncRead;
-use tokio::net::TcpListener;
 // Capn'p clients are not Sync
 use tokio::runtime::current_thread;
 
@@ -15,19 +13,9 @@ extern crate clap;
 use clap::{Arg, App};
 
 extern crate pimostat;
-use pimostat::{sensor_capnp};
+use pimostat::{Error, sensor_capnp, controller_capnp};
 
 use std::net::SocketAddr;
-
-struct Sensor (pub f32);
-impl sensor_capnp::sensor::Server for Sensor {
-    fn measure(&mut self, _: sensor_capnp::sensor::MeasureParams,
-               mut results: sensor_capnp::sensor::MeasureResults)
-               -> capnp::capability::Promise<(), capnp::Error> {
-        pry!(results.get().get_state()).set_value(self.0);
-        capnp::capability::Promise::ok(())
-    }
-}
 
 
 fn main() {
@@ -43,47 +31,39 @@ fn main() {
     let port: u16 = matches.value_of("port").unwrap()
         .parse().unwrap();
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
-    let listener = TcpListener::bind(&addr)
-        .expect("Failed to bind to socket");
 
     let temperature: f32 = matches.value_of("temperature").unwrap()
         .parse().unwrap();
 
-    let client = sensor_capnp::sensor::ToClient::new(Sensor(temperature))
-        .from_server::<capnp_rpc::Server>();
+    let stream = tokio::net::TcpStream::connect(&addr)
+        .map_err(Error::IO)
+        .map(|s| s.split());
 
-    client.measure_request().send().promise.and_then(|r| {
-        let temperature = r.get().unwrap().get_state()
-            .unwrap().get_value();
-        println!("Current temperature is {}", temperature);
-        Ok(())
-    }).wait().unwrap();
+    let mut hello_builder = capnp::message::Builder::new_default();
+    {
+        let mut msg = builder.init_root::<controller_capnp::hello::Builder>();
+        msg.set_type(controller_capnp::hello::Type::Sensor);
+    }
 
-    let mut builder = capnp::message::Builder::new_default();
+    let stream = stream
+        .and_then(|(reader, writer)| {
+            capnp_futures::serialize::write_message(writer, hello_builder)
+                .map_err(Error::CapnP)
+                .map(|(writer, _)| (reader, writer))
+        });
+
+    let mut msg_builder = capnp::message::Builder::new_default();
     {
         let mut msg = builder.init_root::<sensor_capnp::sensor_state::Builder>();
         msg.set_value(temperature);
     }
 
-    // Listen
-    let server = listener.incoming().for_each(|s| {
-        if let Err(e)  = s.set_nodelay(true) {
-            eprintln!("Warning: could not set nodelay ({})", e)
-        };
-
-        let (reader, writer) = s.split();
-
-        let network = capnp_rpc::twoparty::VatNetwork::new(
-            reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Server, Default::default()
-        );
-        let rpc_system = capnp_rpc::RpcSystem::new(
-            Box::new(network), Some(client.clone().client)
-        );
-        current_thread::spawn(rpc_system.map_err(
-            |e| {eprintln!("Error in RPC system ({})", e)}
-        ));
-        Ok(())
-    });
+    let stream = stream
+        .and_then(|(reader, writer)| {
+            capnp_futures::serialize::write_message(writer, msg_builder)
+                .map_err(Error::CapnP)
+                .map(|(writer, _)| (reader, writer))
+        });
 
     current_thread::block_on_all(server)
         .expect("Failed to run RPC server");
