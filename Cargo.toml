@@ -7,6 +7,7 @@ build = "build.rs"
 [dependencies]
 capnp = "0.9"
 capnp-rpc = "0.9"
+capnp-futures = "0.9"
 clap = "2.32"
 futures = "0.1.25"
 tokio = "0.1"

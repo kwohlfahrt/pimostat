@@ -36,3 +36,7 @@ pub mod actor_capnp {
 pub mod sensor_capnp {
     include!(concat!(env!("OUT_DIR"), "/sensor_capnp.rs"));
 }
+
+pub mod controller_capnp {
+    include!(concat!(env!("OUT_DIR"), "/controller_capnp.rs"));
+}
