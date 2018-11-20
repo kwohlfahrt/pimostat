@@ -41,11 +41,11 @@ fn main() {
 
     let stream = tokio::net::TcpStream::connect(&addr)
         .map_err(Error::IO)
-        .and_then(|s| {
+        .map(|s| {
             if let Err(e) = s.set_nodelay(true) {
                 eprintln!("Warning: could not set nodelay ({})", e)
             };
-            Ok(s.split())
+            s.split()
         });
 
     let client = actor_capnp::actor::ToClient::new(Actor())
