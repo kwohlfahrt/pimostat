@@ -41,7 +41,7 @@ fn main() {
 
     let mut hello_builder = capnp::message::Builder::new_default();
     {
-        let mut msg = builder.init_root::<controller_capnp::hello::Builder>();
+        let mut msg = hello_builder.init_root::<controller_capnp::hello::Builder>();
         msg.set_type(controller_capnp::hello::Type::Sensor);
     }
 
@@ -54,7 +54,7 @@ fn main() {
 
     let mut msg_builder = capnp::message::Builder::new_default();
     {
-        let mut msg = builder.init_root::<sensor_capnp::sensor_state::Builder>();
+        let mut msg = msg_builder.init_root::<sensor_capnp::sensor_state::Builder>();
         msg.set_value(temperature);
     }
 
@@ -65,6 +65,6 @@ fn main() {
                 .map(|(writer, _)| (reader, writer))
         });
 
-    current_thread::block_on_all(server)
+    current_thread::block_on_all(stream)
         .expect("Failed to run RPC server");
 }

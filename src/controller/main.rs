@@ -7,6 +7,7 @@ use clap::{Arg, App};
 
 extern crate futures;
 use futures::{Future, Stream};
+use futures::future::Either;
 
 extern crate tokio;
 use tokio::io::AsyncRead;
@@ -14,7 +15,7 @@ use tokio::io::AsyncRead;
 use tokio::runtime::current_thread;
 
 extern crate pimostat;
-use pimostat::{Error, actor_capnp, controller_capnp};
+use pimostat::{Error, actor_capnp, sensor_capnp, controller_capnp};
 
 use std::net::SocketAddr;
 
@@ -80,17 +81,14 @@ fn main() {
         .and_then(|(reader, writer, hello)| {
             match hello {
                 controller_capnp::hello::Type::Sensor => {
-                    /*
-                    capnp_futures::serialize::read_message(reader, read_opts)
+                    Either::A(capnp_futures::serialize::read_message(reader, read_opts)
                         .map_err(Error::CapnP)
-                        .map(|(reader, msg)|{
+                        .map(|(_, msg)|{
                             let value = msg.unwrap().get_root::<sensor_capnp::sensor_state::Reader>()
                                 .unwrap().get_value();
                             println!("Temperature is: {}", value);
-                            (reader, writer)
-                        })
-                    */
-                    unimplemented!()
+                            ()
+                        }))
                 },
                 controller_capnp::hello::Type::Actor => {
                     let network = capnp_rpc::twoparty::VatNetwork::new(
@@ -101,9 +99,9 @@ fn main() {
                         rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
                     current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-                    actor.toggle_request().send().promise
+                    Either::B(actor.toggle_request().send().promise
                         .map_err(Error::CapnP)
-                        .map(|_| println!("Received RPC Response"))
+                        .map(|_| println!("Received RPC Response")))
                 },
             }
         }).for_each(|_| Ok(()));
