@@ -8,6 +8,7 @@ use clap::{Arg, App};
 extern crate futures;
 use futures::{Future, Stream};
 use futures::future::Either;
+use futures::sync::mpsc;
 
 extern crate tokio;
 use tokio::io::AsyncRead;
@@ -60,6 +61,8 @@ fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .expect("Failed to bind to socket");
 
+    let mut channels = Vec::<mpsc::Sender<f32>>::new();
+
     let server = listener.incoming()
         .map_err(Error::IO)
         .map(|s| {
@@ -99,9 +102,15 @@ fn main() {
                         rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
                     current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-                    Either::B(actor.toggle_request().send().promise
-                        .map_err(Error::CapnP)
-                        .map(|_| println!("Received RPC Response")))
+                    let (sender, receiver) = mpsc::channel(0);
+                    channels.push(sender);
+
+                    Either::B(receiver.map_err(|_| unreachable!()).for_each(move |f| {
+                        println!("Read {} from channel", f);
+                        actor.toggle_request().send().promise
+                            .map_err(Error::CapnP)
+                            .map(|_| println!("Received RPC Response"))
+                    }))
                 },
             }
         }).for_each(|_| Ok(()));
