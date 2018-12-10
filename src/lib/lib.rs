@@ -4,7 +4,7 @@ extern crate capnp;
 pub enum Error {
     CapnP(capnp::Error),
     IO(std::io::Error),
-    Send(futures::sync::mpsc::SendError<f32>),
+    Send(futures::sync::mpsc::SendError<bool>),
 }
 
 impl std::fmt::Display for Error {

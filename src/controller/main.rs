@@ -20,6 +20,7 @@ use pimostat::{Error, actor_capnp, sensor_capnp, controller_capnp};
 
 use std::net::SocketAddr;
 
+#[derive(Copy, Clone)]
 struct Config {
     pub target: f32,
     pub hysteresis: f32,
@@ -48,7 +49,7 @@ fn main() {
         .parse().expect("Invalid port");
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
 
-    let _cfg = Config {
+    let cfg = Config {
         target: matches.value_of("target").unwrap()
             .parse().expect("Invalid temperature"),
         hysteresis: matches.value_of("hysteresis").unwrap_or("1.5")
@@ -90,7 +91,7 @@ fn main() {
                                 .unwrap().get_value()
                         ).and_then(
                             |t| stream::iter_ok(channels)
-                                .and_then(move |sender| sender.send(t).map_err(Error::Send))
+                                .and_then(move |sender| sender.send(t < cfg.target).map_err(Error::Send))
                                 .collect()
                         )
                 ),
@@ -105,11 +106,12 @@ fn main() {
 
                     let (sender, receiver) = mpsc::channel(0);
                     channels.push(sender);
-                    current_thread::spawn(receiver.for_each(move |t| {
-                        println!("Read {} from channel", t);
-                        actor.toggle_request().send().promise
+                    current_thread::spawn(receiver.for_each(move |state| {
+                        let mut req = actor.toggle_request();
+                        req.get().set_state(state);
+                        req.send().promise
                             .map_err(|e| eprintln!("RPC error: ({})", e))
-                            .map(|_| println!("Received RPC Response"))
+                            .map(|_| ())
                     }));
                     Either::B(Ok(channels).into_future())
                 },

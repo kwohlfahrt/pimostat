@@ -2,6 +2,8 @@ extern crate capnp;
 extern crate capnp_futures;
 extern crate capnp_rpc;
 
+use capnp_rpc::pry;
+
 extern crate clap;
 use clap::{Arg, App};
 
@@ -20,10 +22,11 @@ use std::net::SocketAddr;
 
 struct Actor ();
 impl actor_capnp::actor::Server for Actor {
-    fn toggle(&mut self, _: actor_capnp::actor::ToggleParams,
+    fn toggle(&mut self, params: actor_capnp::actor::ToggleParams,
                _: actor_capnp::actor::ToggleResults)
                -> capnp::capability::Promise<(), capnp::Error> {
-        println!("Toggling actor!");
+        let state = pry!(params.get()).get_state();
+        println!("Setting actor to {}!", state);
         capnp::capability::Promise::ok(())
     }
 }
