@@ -1,9 +1,10 @@
 extern crate capnp;
 
 #[derive(Debug)]
-pub enum Error{
+pub enum Error {
     CapnP(capnp::Error),
     IO(std::io::Error),
+    Send(futures::sync::mpsc::SendError<f32>),
 }
 
 impl std::fmt::Display for Error {
@@ -11,6 +12,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::IO(e) => write!(fmt, "IO({})", e),
             Error::CapnP(e) => write!(fmt, "CapnP({})", e),
+            Error::Send(e) => write!(fmt, "Send({})", e),
         }
     }
 }

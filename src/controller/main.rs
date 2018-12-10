@@ -6,7 +6,7 @@ extern crate clap;
 use clap::{Arg, App};
 
 extern crate futures;
-use futures::{Future, Stream};
+use futures::{stream, Future, Stream, Sink, IntoFuture};
 use futures::future::Either;
 use futures::sync::mpsc;
 
@@ -61,8 +61,6 @@ fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .expect("Failed to bind to socket");
 
-    let mut channels = Vec::<mpsc::Sender<f32>>::new();
-
     let server = listener.incoming()
         .map_err(Error::IO)
         .map(|s| {
@@ -81,17 +79,18 @@ fn main() {
                     (reader, writer, value)
                 })
         })
-        .and_then(|(reader, writer, hello)| {
+        .fold(Vec::new(), |mut channels: Vec::<mpsc::Sender<f32>>, (reader, writer, hello)| {
             match hello {
                 controller_capnp::hello::Type::Sensor => {
-                    Either::A(capnp_futures::serialize::read_message(reader, read_opts)
+                    let t = capnp_futures::serialize::read_message(reader, read_opts)
                         .map_err(Error::CapnP)
-                        .map(|(_, msg)|{
-                            let value = msg.unwrap().get_root::<sensor_capnp::sensor_state::Reader>()
-                                .unwrap().get_value();
-                            println!("Temperature is: {}", value);
-                            ()
-                        }))
+                        .map(|(_, msg)| {
+                            msg.unwrap().get_root::<sensor_capnp::sensor_state::Reader>()
+                                .unwrap().get_value()
+                        });
+                    Either::A(stream::iter_ok(channels).and_then(|sender| {
+                        sender.send(10.0 as f32).map_err(Error::Send)
+                    }).collect())
                 },
                 controller_capnp::hello::Type::Actor => {
                     let network = capnp_rpc::twoparty::VatNetwork::new(
@@ -102,18 +101,18 @@ fn main() {
                         rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
                     current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-                    let (sender, receiver) = mpsc::channel(0);
+                    let (sender, receiver) = mpsc::channel::<f32>(0);
                     channels.push(sender);
-
-                    Either::B(receiver.map_err(|_| unreachable!()).for_each(move |f| {
-                        println!("Read {} from channel", f);
+                    current_thread::spawn(receiver.for_each(move |t| {
+                        println!("Read {} from channel", t);
                         actor.toggle_request().send().promise
-                            .map_err(Error::CapnP)
+                            .map_err(|e| eprintln!("RPC error: ({})", e))
                             .map(|_| println!("Received RPC Response"))
-                    }))
+                    }));
+                    Either::B(Ok(channels).into_future())
                 },
             }
-        }).for_each(|_| Ok(()));
+        }).map(drop);
 
     current_thread::block_on_all(server)
         .expect("Failed to run RPC client");
