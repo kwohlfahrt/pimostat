@@ -79,19 +79,21 @@ fn main() {
                     (reader, writer, value)
                 })
         })
-        .fold(Vec::new(), |mut channels: Vec::<mpsc::Sender<f32>>, (reader, writer, hello)| {
+        .fold(Vec::new(), |mut channels: Vec<mpsc::Sender<_>>, (reader, writer, hello)| {
             match hello {
-                controller_capnp::hello::Type::Sensor => {
-                    let t = capnp_futures::serialize::read_message(reader, read_opts)
+                controller_capnp::hello::Type::Sensor => Either::A(
+                    capnp_futures::serialize::read_message(reader, read_opts)
                         .map_err(Error::CapnP)
-                        .map(|(_, msg)| {
-                            msg.unwrap().get_root::<sensor_capnp::sensor_state::Reader>()
+                        .map(
+                            |(_, msg)| msg.unwrap()
+                                .get_root::<sensor_capnp::sensor_state::Reader>()
                                 .unwrap().get_value()
-                        });
-                    Either::A(stream::iter_ok(channels).and_then(|sender| {
-                        sender.send(10.0 as f32).map_err(Error::Send)
-                    }).collect())
-                },
+                        ).and_then(
+                            |t| stream::iter_ok(channels)
+                                .and_then(move |sender| sender.send(t).map_err(Error::Send))
+                                .collect()
+                        )
+                ),
                 controller_capnp::hello::Type::Actor => {
                     let network = capnp_rpc::twoparty::VatNetwork::new(
                         reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Client, Default::default()
@@ -101,7 +103,7 @@ fn main() {
                         rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
                     current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-                    let (sender, receiver) = mpsc::channel::<f32>(0);
+                    let (sender, receiver) = mpsc::channel(0);
                     channels.push(sender);
                     current_thread::spawn(receiver.for_each(move |t| {
                         println!("Read {} from channel", t);
