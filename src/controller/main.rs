@@ -57,15 +57,12 @@ fn main() {
     };
     let read_opts = capnp::message::ReaderOptions::new();
 
-    let mut _on: bool = false;
-
     let listener = tokio::net::TcpListener::bind(&addr)
         .expect("Failed to bind to socket");
 
     let server = listener.incoming()
         .map_err(Error::IO)
         .map(|s| {
-            println!("Accepted connection");
             if let Err(e)  = s.set_nodelay(true) {
                 eprintln!("Warning: could not set nodelay ({})", e)
             };
@@ -80,7 +77,7 @@ fn main() {
                     (reader, writer, value)
                 })
         })
-        .fold(Vec::new(), |mut channels: Vec<mpsc::Sender<_>>, (reader, writer, hello)| {
+        .fold((false, Vec::new()), |(mut on, mut channels): (_, Vec<mpsc::Sender<_>>), (reader, writer, hello)| {
             match hello {
                 controller_capnp::hello::Type::Sensor => Either::A(
                     capnp_futures::serialize::read_message(reader, read_opts)
@@ -89,11 +86,12 @@ fn main() {
                             |(_, msg)| msg.unwrap()
                                 .get_root::<sensor_capnp::sensor_state::Reader>()
                                 .unwrap().get_value()
-                        ).and_then(
-                            |t| stream::iter_ok(channels)
-                                .and_then(move |sender| sender.send(t < cfg.target).map_err(Error::Send))
-                                .collect()
-                        )
+                        ).and_then(move |t| {
+                            update(&mut on, t, &cfg);
+                            stream::iter_ok(channels)
+                                .and_then(move |sender| sender.send(on).map_err(Error::Send))
+                                .collect().map(move |channels| (on, channels))
+                        })
                 ),
                 controller_capnp::hello::Type::Actor => {
                     let network = capnp_rpc::twoparty::VatNetwork::new(
@@ -113,7 +111,7 @@ fn main() {
                             .map_err(|e| eprintln!("RPC error: ({})", e))
                             .map(|_| ())
                     }));
-                    Either::B(Ok(channels).into_future())
+                    Either::B(Ok((on, channels)).into_future())
                 },
             }
         }).map(drop);
