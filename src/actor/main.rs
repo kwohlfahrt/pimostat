@@ -19,15 +19,22 @@ extern crate pimostat;
 use pimostat::{Error, actor_capnp, controller_capnp};
 
 use std::net::SocketAddr;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 
-struct Actor ();
+struct Actor {
+    gpio: File
+}
+
 impl actor_capnp::actor::Server for Actor {
     fn toggle(&mut self, params: actor_capnp::actor::ToggleParams,
                _: actor_capnp::actor::ToggleResults)
                -> capnp::capability::Promise<(), capnp::Error> {
         let state = pry!(params.get()).get_state();
-        println!("Setting actor to {}!", state);
-        capnp::capability::Promise::ok(())
+        match write!(self.gpio, "{}", if state {"1"} else {"0"}) {
+            Ok(()) => capnp::capability::Promise::ok(()),
+            Err(e) => capnp::capability::Promise::err(capnp::Error::failed(format!("{}", e))),
+        }
     }
 }
 
@@ -36,11 +43,16 @@ fn main() {
         .arg(Arg::with_name("port")
              .required(true)
              .index(1))
+        .arg(Arg::with_name("GPIO")
+             .required(true)
+             .index(2))
         .get_matches();
 
     let port: u16 = matches.value_of("port").unwrap()
         .parse().expect("Invalid port");
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
+    let gpio = OpenOptions::new().read(false).write(true)
+        .open(matches.value_of("GPIO").unwrap()).unwrap();
 
     let stream = tokio::net::TcpStream::connect(&addr)
         .map_err(Error::IO)
@@ -51,7 +63,7 @@ fn main() {
             s.split()
         });
 
-    let client = actor_capnp::actor::ToClient::new(Actor())
+    let client = actor_capnp::actor::ToClient::new(Actor {gpio})
         .from_server::<capnp_rpc::Server>();
 
     let mut builder = capnp::message::Builder::new_default();
