@@ -17,6 +17,7 @@ use pimostat::{Error, sensor_capnp, controller_capnp};
 
 use std::net::SocketAddr;
 
+mod parse;
 
 fn main() {
     let matches = App::new("Thermostat Controller")
