@@ -39,7 +39,7 @@ impl actor_capnp::actor::Server for Actor {
 }
 
 fn main() {
-    let matches = App::new("Temperature Sensor")
+    let matches = App::new("Temperature Actor")
         .arg(Arg::with_name("port")
              .required(true)
              .index(1))

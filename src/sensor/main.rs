@@ -16,15 +16,18 @@ extern crate pimostat;
 use pimostat::{Error, sensor_capnp, controller_capnp};
 
 use std::net::SocketAddr;
+use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
 
 mod parse;
+use parse::parse;
 
 fn main() {
-    let matches = App::new("Thermostat Controller")
+    let matches = App::new("Thermostat Sensor")
         .arg(Arg::with_name("port")
              .required(true)
              .index(1))
-        .arg(Arg::with_name("temperature")
+        .arg(Arg::with_name("source")
              .required(true)
              .index(2))
         .get_matches();
@@ -33,8 +36,9 @@ fn main() {
         .parse().unwrap();
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
 
-    let temperature: f32 = matches.value_of("temperature").unwrap()
-        .parse().unwrap();
+    let mut source = BufReader::new(
+        File::open(matches.value_of("source").unwrap()).unwrap()
+    );
 
     let stream = tokio::net::TcpStream::connect(&addr)
         .map_err(Error::IO)
@@ -56,7 +60,8 @@ fn main() {
     let mut msg_builder = capnp::message::Builder::new_default();
     {
         let mut msg = msg_builder.init_root::<sensor_capnp::sensor_state::Builder>();
-        msg.set_value(temperature);
+        source.seek(SeekFrom::Start(0)).unwrap();
+        msg.set_value(parse(&mut source).unwrap());
     }
 
     let stream = stream

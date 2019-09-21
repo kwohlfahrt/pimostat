@@ -36,7 +36,7 @@ fn update(on: &mut bool, temperature: f32, cfg: &Config) {
 }
 
 fn main() {
-    let matches = App::new("Temperature Sensor")
+    let matches = App::new("Temperature Controller")
         .arg(Arg::with_name("port")
              .required(true)
              .index(1))
