@@ -5,7 +5,7 @@ extern crate capnp_rpc;
 use capnp_rpc::pry;
 
 extern crate clap;
-use clap::{Arg, App};
+use clap::{App, Arg};
 
 extern crate tokio;
 use tokio::io::AsyncRead;
@@ -16,22 +16,24 @@ extern crate futures;
 use futures::Future;
 
 extern crate pimostat;
-use pimostat::{Error, actor_capnp, controller_capnp};
+use pimostat::{actor_capnp, controller_capnp, Error};
 
-use std::net::SocketAddr;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::net::SocketAddr;
 
 struct Actor {
-    gpio: File
+    gpio: File,
 }
 
 impl actor_capnp::actor::Server for Actor {
-    fn toggle(&mut self, params: actor_capnp::actor::ToggleParams,
-               _: actor_capnp::actor::ToggleResults)
-               -> capnp::capability::Promise<(), capnp::Error> {
+    fn toggle(
+        &mut self,
+        params: actor_capnp::actor::ToggleParams,
+        _: actor_capnp::actor::ToggleResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
         let state = pry!(params.get()).get_state();
-        match write!(self.gpio, "{}", if state {"1"} else {"0"}) {
+        match write!(self.gpio, "{}", if state { "1" } else { "0" }) {
             Ok(()) => capnp::capability::Promise::ok(()),
             Err(e) => capnp::capability::Promise::err(capnp::Error::failed(format!("{}", e))),
         }
@@ -40,19 +42,21 @@ impl actor_capnp::actor::Server for Actor {
 
 fn main() {
     let matches = App::new("Temperature Actor")
-        .arg(Arg::with_name("port")
-             .required(true)
-             .index(1))
-        .arg(Arg::with_name("GPIO")
-             .required(true)
-             .index(2))
+        .arg(Arg::with_name("port").required(true).index(1))
+        .arg(Arg::with_name("GPIO").required(true).index(2))
         .get_matches();
 
-    let port: u16 = matches.value_of("port").unwrap()
-        .parse().expect("Invalid port");
+    let port: u16 = matches
+        .value_of("port")
+        .unwrap()
+        .parse()
+        .expect("Invalid port");
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
-    let gpio = OpenOptions::new().read(false).write(true)
-        .open(matches.value_of("GPIO").unwrap()).unwrap();
+    let gpio = OpenOptions::new()
+        .read(false)
+        .write(true)
+        .open(matches.value_of("GPIO").unwrap())
+        .unwrap();
 
     let stream = tokio::net::TcpStream::connect(&addr)
         .map_err(Error::IO)
@@ -63,8 +67,8 @@ fn main() {
             s.split()
         });
 
-    let client = actor_capnp::actor::ToClient::new(Actor {gpio})
-        .into_client::<capnp_rpc::Server>();
+    let client =
+        actor_capnp::actor::ToClient::new(Actor { gpio }).into_client::<capnp_rpc::Server>();
 
     let mut builder = capnp::message::Builder::new_default();
     {
@@ -80,13 +84,14 @@ fn main() {
         })
         .and_then(|(reader, writer)| {
             let network = capnp_rpc::twoparty::VatNetwork::new(
-                reader, writer, capnp_rpc::rpc_twoparty_capnp::Side::Server, Default::default()
+                reader,
+                writer,
+                capnp_rpc::rpc_twoparty_capnp::Side::Server,
+                Default::default(),
             );
-            capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client))
-                .map_err(Error::CapnP)
+            capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client)).map_err(Error::CapnP)
         });
 
     println!("Starting RPC system");
-    current_thread::block_on_all(rpc_system)
-        .expect("Failed to run RPC server");
+    current_thread::block_on_all(rpc_system).expect("Failed to run RPC server");
 }

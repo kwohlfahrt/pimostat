@@ -10,35 +10,28 @@ use tokio::io::AsyncRead;
 use tokio::runtime::current_thread;
 
 extern crate clap;
-use clap::{Arg, App};
+use clap::{App, Arg};
 
 extern crate pimostat;
-use pimostat::{Error, sensor_capnp, controller_capnp};
+use pimostat::{controller_capnp, sensor_capnp, Error};
 
-use std::net::SocketAddr;
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
+use std::net::SocketAddr;
 
 mod parse;
 use parse::parse;
 
 fn main() {
     let matches = App::new("Thermostat Sensor")
-        .arg(Arg::with_name("port")
-             .required(true)
-             .index(1))
-        .arg(Arg::with_name("source")
-             .required(true)
-             .index(2))
+        .arg(Arg::with_name("port").required(true).index(1))
+        .arg(Arg::with_name("source").required(true).index(2))
         .get_matches();
 
-    let port: u16 = matches.value_of("port").unwrap()
-        .parse().unwrap();
+    let port: u16 = matches.value_of("port").unwrap().parse().unwrap();
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
 
-    let mut source = BufReader::new(
-        File::open(matches.value_of("source").unwrap()).unwrap()
-    );
+    let mut source = BufReader::new(File::open(matches.value_of("source").unwrap()).unwrap());
 
     let stream = tokio::net::TcpStream::connect(&addr)
         .map_err(Error::IO)
@@ -50,12 +43,11 @@ fn main() {
         msg.set_type(controller_capnp::hello::Type::Sensor);
     }
 
-    let stream = stream
-        .and_then(|(reader, writer)| {
-            capnp_futures::serialize::write_message(writer, hello_builder)
-                .map_err(Error::CapnP)
-                .map(|(writer, _)| (reader, writer))
-        });
+    let stream = stream.and_then(|(reader, writer)| {
+        capnp_futures::serialize::write_message(writer, hello_builder)
+            .map_err(Error::CapnP)
+            .map(|(writer, _)| (reader, writer))
+    });
 
     let mut msg_builder = capnp::message::Builder::new_default();
     {
@@ -64,13 +56,11 @@ fn main() {
         msg.set_value(parse(&mut source).unwrap());
     }
 
-    let stream = stream
-        .and_then(|(reader, writer)| {
-            capnp_futures::serialize::write_message(writer, msg_builder)
-                .map_err(Error::CapnP)
-                .map(|(writer, _)| (reader, writer))
-        });
+    let stream = stream.and_then(|(reader, writer)| {
+        capnp_futures::serialize::write_message(writer, msg_builder)
+            .map_err(Error::CapnP)
+            .map(|(writer, _)| (reader, writer))
+    });
 
-    current_thread::block_on_all(stream)
-        .expect("Failed to run RPC server");
+    current_thread::block_on_all(stream).expect("Failed to run RPC server");
 }
