@@ -64,7 +64,7 @@ fn main() {
         });
 
     let client = actor_capnp::actor::ToClient::new(Actor {gpio})
-        .from_server::<capnp_rpc::Server>();
+        .into_client::<capnp_rpc::Server>();
 
     let mut builder = capnp::message::Builder::new_default();
     {
