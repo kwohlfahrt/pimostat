@@ -35,11 +35,23 @@ fn update(on: &mut bool, temperature: f32, cfg: &Config) {
     }
 }
 
+struct Actor {
+    actor: actor_capnp::actor::Client,
+    pending: Option<
+        Box<
+            dyn Future<
+                Item = capnp::capability::Response<actor_capnp::actor::toggle_results::Owned>,
+                Error = Error,
+            >,
+        >,
+    >,
+}
+
 // There would be fewer Box<dyn ...> with existential type aliases
 struct State {
     config: Config,
     on: bool,
-    actor: Option<actor_capnp::actor::Client>,
+    actor: Option<Actor>,
     sensor: Box<dyn Stream<Item = f32, Error = Error>>,
     incoming: Box<dyn Stream<Item = actor_capnp::actor::Client, Error = Error>>,
 }
@@ -119,31 +131,48 @@ impl Future for State {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.actor.as_ref() {
+	let updated;
+
+        match self.sensor.poll()? {
+            Async::NotReady => {
+		updated = false;
+	    }
+            Async::Ready(None) => return Ok(Async::Ready(())),
+            Async::Ready(Some(value)) => {
+		updated = true;
+		update(&mut self.on, value, &self.config);
+	    },
+        }
+
+        match self.actor.as_mut() {
             None => match self.incoming.poll()? {
+                Async::NotReady => Ok(Async::NotReady),
                 Async::Ready(None) => Ok(Async::Ready(())),
-                Async::Ready(Some(s)) => {
-                    self.actor = Some(s);
+                Async::Ready(Some(a)) => {
+                    self.actor = Some(Actor {
+                        actor: a,
+                        pending: None,
+                    });
                     self.poll()
                 }
-                Async::NotReady => Ok(Async::NotReady),
             },
-            Some(actor) => match self.sensor.poll()? {
-                Async::Ready(None) => Ok(Async::Ready(())),
-                Async::Ready(Some(value)) => {
-                    update(&mut self.on, value, &self.config);
-                    let mut req = actor.toggle_request();
+            Some(actor) => match actor.pending.as_mut() {
+                None => if updated {
+                    let mut req = actor.actor.toggle_request();
                     req.get().set_state(self.on);
-                    // FIXME: This is messy, need to wait for this to complete before sending next
-                    current_thread::spawn(
-                        req.send()
-                            .promise
-                            .map_err(|e| eprintln!("RPC error: {}", e))
-                            .map(|_| ()),
-                    );
+                    actor.pending = Some(Box::new(req.send().promise.map_err(Error::CapnP)));
                     self.poll()
-                }
-                Async::NotReady => Ok(Async::NotReady),
+                } else {
+		    // self.sensor.poll() returned NotReady
+		    Ok(Async::NotReady)
+		},
+                Some(p) => match p.poll()? {
+		    Async::NotReady => Ok(Async::NotReady),
+		    Async::Ready(_) => {
+			actor.pending = None;
+			self.poll()
+		    }
+		},
             },
         }
     }
