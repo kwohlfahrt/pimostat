@@ -57,15 +57,6 @@ fn main() {
         .open(matches.value_of("GPIO").unwrap())
         .unwrap();
 
-    let stream = tokio::net::TcpStream::connect(&addr)
-        .map_err(Error::IO)
-        .map(|s| {
-            if let Err(e) = s.set_nodelay(true) {
-                eprintln!("Warning: could not set nodelay ({})", e)
-            };
-            s.split()
-        });
-
     let client =
         actor_capnp::actor::ToClient::new(Actor { gpio }).into_client::<capnp_rpc::Server>();
 
@@ -75,8 +66,13 @@ fn main() {
         msg.set_type(controller_capnp::hello::Type::Actor);
     }
 
-    let rpc_system = stream
-        .and_then(|(reader, writer)| {
+    let rpc_system = tokio::net::TcpStream::connect(&addr)
+        .map_err(Error::IO)
+        .and_then(|s| {
+            if let Err(e) = s.set_nodelay(true) {
+                eprintln!("Warning: could not set nodelay ({})", e)
+            };
+            let (reader, writer) = s.split();
             capnp_futures::serialize::write_message(writer, builder)
                 .map_err(Error::CapnP)
                 .map(|(writer, _)| (reader, writer))
