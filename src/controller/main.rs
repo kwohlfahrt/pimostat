@@ -40,7 +40,7 @@ struct State {
     config: Config,
     on: bool,
     actor: Option<actor_capnp::actor::Client>,
-    sensor: Option<Box<dyn Stream<Item = f32, Error = Error>>>,
+    sensor: Box<dyn Stream<Item = f32, Error = Error>>,
     incoming: Box<dyn Stream<Item = actor_capnp::actor::Client, Error = Error>>,
 }
 
@@ -82,11 +82,33 @@ impl State {
                     })
             });
 
+        let sensor = tokio::net::TcpStream::connect(&config.sensor)
+            .map_err(Error::IO)
+            .map(move |s| {
+                stream::unfold(s, |s| {
+                    let read_opts = capnp::message::ReaderOptions::new();
+                    Some(
+                        capnp_futures::serialize::read_message(s, read_opts)
+                            .map_err(Error::CapnP)
+                            .map(|(s, msg)| {
+                                (
+                                    msg.unwrap()
+                                        .get_root::<sensor_capnp::state::Reader>()
+                                        .unwrap()
+                                        .get_value(),
+                                    s,
+                                )
+                            }),
+                    )
+                })
+            })
+            .flatten_stream();
+
         Ok(Self {
             config,
             on: false,
             actor: None,
-            sensor: None,
+            sensor: Box::new(sensor),
             incoming: Box::new(incoming),
         })
     }
@@ -95,9 +117,10 @@ impl State {
 impl Future for State {
     type Item = ();
     type Error = Error;
+
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match (self.actor.as_ref(), self.sensor.as_mut()) {
-            (None, _) => match self.incoming.poll()? {
+        match self.actor.as_ref() {
+            None => match self.incoming.poll()? {
                 Async::Ready(None) => Ok(Async::Ready(())),
                 Async::Ready(Some(s)) => {
                     self.actor = Some(s);
@@ -105,36 +128,8 @@ impl Future for State {
                 }
                 Async::NotReady => Ok(Async::NotReady),
             },
-            (Some(_), None) => {
-                let stream = tokio::net::TcpStream::connect(&self.config.sensor)
-                    .map_err(Error::IO)
-                    .map(move |s| {
-                        stream::unfold(s, |s| {
-                            let read_opts = capnp::message::ReaderOptions::new();
-                            Some(
-                                capnp_futures::serialize::read_message(s, read_opts)
-                                    .map_err(Error::CapnP)
-                                    .map(|(s, msg)| {
-                                        (
-                                            msg.unwrap()
-                                                .get_root::<sensor_capnp::state::Reader>()
-                                                .unwrap()
-                                                .get_value(),
-                                            s,
-                                        )
-                                    }),
-                            )
-                        })
-                    })
-                    .flatten_stream();
-                self.sensor = Some(Box::new(stream));
-                self.poll()
-            }
-            (Some(actor), Some(sensor)) => match sensor.poll()? {
-                Async::Ready(None) => {
-                    self.sensor = None;
-                    self.poll()
-                }
+            Some(actor) => match self.sensor.poll()? {
+                Async::Ready(None) => Ok(Async::Ready(())),
                 Async::Ready(Some(value)) => {
                     update(&mut self.on, value, &self.config);
                     let mut req = actor.toggle_request();
