@@ -3,7 +3,6 @@
 struct Hello {
   enum Type {
     actor @0;
-    sensor @1;
   }
 
   type @0 :Type;

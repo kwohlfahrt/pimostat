@@ -1,8 +1,11 @@
 extern crate capnp;
+extern crate tokio;
 
 #[derive(Debug)]
 pub enum Error {
     CapnP(capnp::Error),
+    Schema(capnp::NotInSchema),
+    Timer(tokio::timer::Error),
     IO(std::io::Error),
     Send(futures::sync::mpsc::SendError<bool>),
 }
@@ -11,9 +14,17 @@ impl std::fmt::Display for Error {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
         match self {
             Error::IO(e) => write!(fmt, "IO({})", e),
-            Error::CapnP(e) => write!(fmt, "CapnP({})", e),
+            Error::CapnP(e) => write!(fmt, "Schema({})", e),
+            Error::Schema(e) => write!(fmt, "CapnP({})", e),
             Error::Send(e) => write!(fmt, "Send({})", e),
+            Error::Timer(e) => write!(fmt, "Timer({})", e),
         }
+    }
+}
+
+impl From<capnp::NotInSchema> for Error {
+    fn from(e: capnp::NotInSchema) -> Self {
+        Error::Schema(e)
     }
 }
 

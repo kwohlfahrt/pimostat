@@ -6,9 +6,7 @@ extern crate clap;
 use clap::{App, Arg};
 
 extern crate futures;
-use futures::future::Either;
-use futures::sync::mpsc;
-use futures::{stream, Future, IntoFuture, Sink, Stream};
+use futures::{stream, Async, Future, Poll, Stream};
 
 extern crate tokio;
 use tokio::io::AsyncRead;
@@ -24,6 +22,8 @@ use std::net::SocketAddr;
 struct Config {
     pub target: f32,
     pub hysteresis: f32,
+    pub addr: SocketAddr,
+    pub sensor: SocketAddr,
 }
 
 #[allow(unused)]
@@ -35,23 +35,136 @@ fn update(on: &mut bool, temperature: f32, cfg: &Config) {
     }
 }
 
+// There would be fewer Box<dyn ...> with existential type aliases
+struct State {
+    config: Config,
+    on: bool,
+    actor: Option<actor_capnp::actor::Client>,
+    sensor: Option<Box<dyn Stream<Item = f32, Error = Error>>>,
+    incoming: Box<dyn Stream<Item = actor_capnp::actor::Client, Error = Error>>,
+}
+
+impl State {
+    fn new(config: Config) -> Result<Self, Error> {
+        let incoming = tokio::net::TcpListener::bind(&config.addr)?
+            .incoming()
+            .map_err(Error::IO)
+            .and_then(|s| {
+                if let Err(e) = s.set_nodelay(true) {
+                    eprintln!("Warning: could not set nodelay ({})", e)
+                };
+
+                let read_opts = capnp::message::ReaderOptions::new();
+                capnp_futures::serialize::read_message(s, read_opts)
+                    .map_err(Error::CapnP)
+                    .and_then(|(s, msg)| {
+                        msg.unwrap()
+                            .get_root::<controller_capnp::hello::Reader>()?
+                            .get_type()?;
+
+                        let (reader, writer) = s.split();
+                        let network = capnp_rpc::twoparty::VatNetwork::new(
+                            reader,
+                            writer,
+                            capnp_rpc::rpc_twoparty_capnp::Side::Client,
+                            Default::default(),
+                        );
+
+                        let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+                        let client =
+                            rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+
+                        current_thread::spawn(
+                            rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
+                        );
+
+                        Ok(client)
+                    })
+            });
+
+        Ok(Self {
+            config,
+            on: false,
+            actor: None,
+            sensor: None,
+            incoming: Box::new(incoming),
+        })
+    }
+}
+
+impl Future for State {
+    type Item = ();
+    type Error = Error;
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match (self.actor.as_ref(), self.sensor.as_mut()) {
+            (None, _) => match self.incoming.poll()? {
+                Async::Ready(None) => Ok(Async::Ready(())),
+                Async::Ready(Some(s)) => {
+                    self.actor = Some(s);
+                    self.poll()
+                }
+                Async::NotReady => Ok(Async::NotReady),
+            },
+            (Some(_), None) => {
+                let stream = tokio::net::TcpStream::connect(&self.config.sensor)
+                    .map_err(Error::IO)
+                    .map(move |s| {
+                        stream::unfold(s, |s| {
+                            let read_opts = capnp::message::ReaderOptions::new();
+                            Some(
+                                capnp_futures::serialize::read_message(s, read_opts)
+                                    .map_err(Error::CapnP)
+                                    .map(|(s, msg)| {
+                                        (
+                                            msg.unwrap()
+                                                .get_root::<sensor_capnp::state::Reader>()
+                                                .unwrap()
+                                                .get_value(),
+                                            s,
+                                        )
+                                    }),
+                            )
+                        })
+                    })
+                    .flatten_stream();
+                self.sensor = Some(Box::new(stream));
+                self.poll()
+            }
+            (Some(actor), Some(sensor)) => match sensor.poll()? {
+                Async::Ready(None) => {
+                    self.sensor = None;
+                    self.poll()
+                }
+                Async::Ready(Some(value)) => {
+                    update(&mut self.on, value, &self.config);
+                    let mut req = actor.toggle_request();
+                    req.get().set_state(self.on);
+                    // FIXME: This is messy, need to wait for this to complete before sending next
+                    current_thread::spawn(
+                        req.send()
+                            .promise
+                            .map_err(|e| eprintln!("RPC error: {}", e))
+                            .map(|_| ()),
+                    );
+                    self.poll()
+                }
+                Async::NotReady => Ok(Async::NotReady),
+            },
+        }
+    }
+}
+
 fn main() {
     let matches = App::new("Temperature Controller")
         .arg(Arg::with_name("port").required(true).index(1))
-        .arg(Arg::with_name("target").required(true))
+        .arg(Arg::with_name("sensor").required(true))
+        .arg(Arg::with_name("temperature").required(true))
         .arg(Arg::with_name("hysteresis"))
         .get_matches();
 
-    let port: u16 = matches
-        .value_of("port")
-        .unwrap()
-        .parse()
-        .expect("Invalid port");
-    let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
-
     let cfg = Config {
         target: matches
-            .value_of("target")
+            .value_of("temperature")
             .unwrap()
             .parse()
             .expect("Invalid temperature"),
@@ -60,81 +173,23 @@ fn main() {
             .unwrap_or("1.5")
             .parse()
             .expect("Invalid hysteresis"),
+        addr: SocketAddr::new(
+            "0.0.0.0".parse().unwrap(),
+            matches
+                .value_of("port")
+                .unwrap()
+                .parse()
+                .expect("Invalid port"),
+        ),
+        sensor: matches
+            .value_of("sensor")
+            .unwrap()
+            .parse::<SocketAddr>()
+            .expect("Invalid sensor address"),
     };
-    let read_opts = capnp::message::ReaderOptions::new();
 
-    let listener = tokio::net::TcpListener::bind(&addr).expect("Failed to bind to socket");
+    let state = State::new(cfg).expect("Failed to create state");
 
-    let server = listener
-        .incoming()
-        .map_err(Error::IO)
-        .map(|s| {
-            if let Err(e) = s.set_nodelay(true) {
-                eprintln!("Warning: could not set nodelay ({})", e)
-            };
-            s.split()
-        })
-        .and_then(|(reader, writer)| {
-            capnp_futures::serialize::read_message(reader, read_opts)
-                .map_err(Error::CapnP)
-                .map(|(reader, msg)| {
-                    let value = msg
-                        .unwrap()
-                        .get_root::<controller_capnp::hello::Reader>()
-                        .unwrap()
-                        .get_type()
-                        .unwrap();
-                    (reader, writer, value)
-                })
-        })
-        .fold(
-            (false, Vec::new()),
-            |(mut on, mut channels): (_, Vec<mpsc::Sender<_>>), (reader, writer, hello)| match hello
-            {
-                controller_capnp::hello::Type::Sensor => Either::A(
-                    capnp_futures::serialize::read_message(reader, read_opts)
-                        .map_err(Error::CapnP)
-                        .map(|(_, msg)| {
-                            msg.unwrap()
-                                .get_root::<sensor_capnp::sensor_state::Reader>()
-                                .unwrap()
-                                .get_value()
-                        })
-                        .and_then(move |t| {
-                            update(&mut on, t, &cfg);
-                            stream::iter_ok(channels)
-                                .and_then(move |sender| sender.send(on).map_err(Error::Send))
-                                .collect()
-                                .map(move |channels| (on, channels))
-                        }),
-                ),
-                controller_capnp::hello::Type::Actor => {
-                    let network = capnp_rpc::twoparty::VatNetwork::new(
-                        reader,
-                        writer,
-                        capnp_rpc::rpc_twoparty_capnp::Side::Client,
-                        Default::default(),
-                    );
-                    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-                    let actor: actor_capnp::actor::Client =
-                        rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
-                    current_thread::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
-
-                    let (sender, receiver) = mpsc::channel(0);
-                    channels.push(sender);
-                    current_thread::spawn(receiver.for_each(move |state| {
-                        let mut req = actor.toggle_request();
-                        req.get().set_state(state);
-                        req.send()
-                            .promise
-                            .map_err(|e| eprintln!("RPC error: ({})", e))
-                            .map(|_| ())
-                    }));
-                    Either::B(Ok((on, channels)).into_future())
-                }
-            },
-        )
-        .map(drop);
-
-    current_thread::block_on_all(server).expect("Failed to run RPC client");
+    println!("Starting RPC system");
+    current_thread::block_on_all(state).expect("Failed to run RPC client");
 }

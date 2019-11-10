@@ -33,7 +33,7 @@ impl actor_capnp::actor::Server for Actor {
         _: actor_capnp::actor::ToggleResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let state = pry!(params.get()).get_state();
-        match write!(self.gpio, "{}", if state { "1" } else { "0" }) {
+        match write!(self.gpio, "{}\n", if state { "1" } else { "0" }) {
             Ok(()) => capnp::capability::Promise::ok(()),
             Err(e) => capnp::capability::Promise::err(capnp::Error::failed(format!("{}", e))),
         }
@@ -42,16 +42,15 @@ impl actor_capnp::actor::Server for Actor {
 
 fn main() {
     let matches = App::new("Temperature Actor")
-        .arg(Arg::with_name("port").required(true).index(1))
+        .arg(Arg::with_name("controller").required(true).index(1))
         .arg(Arg::with_name("GPIO").required(true).index(2))
         .get_matches();
 
-    let port: u16 = matches
-        .value_of("port")
+    let addr = matches
+        .value_of("controller")
         .unwrap()
-        .parse()
-        .expect("Invalid port");
-    let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), port);
+        .parse::<SocketAddr>()
+        .expect("Invalid controller address");
     let gpio = OpenOptions::new()
         .read(false)
         .write(true)
