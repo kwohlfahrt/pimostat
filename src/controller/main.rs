@@ -41,7 +41,7 @@ struct Actor {
         Box<
             dyn Future<
                 Item = capnp::capability::Response<actor_capnp::actor::toggle_results::Owned>,
-                Error = Error,
+                Error = capnp::Error,
             >,
         >,
     >,
@@ -87,7 +87,7 @@ impl State {
                             rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
                         current_thread::spawn(
-                            rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
+                            rpc_system.map_err(|e| eprintln!("RPC error ({})", e))
                         );
 
                         Ok(client)
@@ -160,17 +160,25 @@ impl Future for State {
                 None => if updated {
                     let mut req = actor.actor.toggle_request();
                     req.get().set_state(self.on);
-                    actor.pending = Some(Box::new(req.send().promise.map_err(Error::CapnP)));
+                    actor.pending = Some(Box::new(req.send().promise));
                     self.poll()
                 } else {
 		    // self.sensor.poll() returned NotReady
 		    Ok(Async::NotReady)
 		},
-                Some(p) => match p.poll()? {
-		    Async::NotReady => Ok(Async::NotReady),
-		    Async::Ready(_) => {
+                Some(p) => match p.poll() {
+		    Ok(Async::NotReady) => Ok(Async::NotReady),
+		    Ok(Async::Ready(_)) => {
 			actor.pending = None;
 			self.poll()
+		    },
+		    Err(e) => {
+			if let capnp::ErrorKind::Disconnected = e.kind {
+			    self.actor = None;
+			    self.poll()
+			} else {
+			    Err(Error::CapnP(e))
+			}
 		    }
 		},
             },
