@@ -2,7 +2,7 @@
 
 let
   cfg = config.services.pimostat;
-  inherit (lib) types mkOption mkIf escapeShellArg;
+  inherit (lib) types mkOption mkIf optional escapeShellArg;
   typeTemp = types.strMatching "[0-9]+(.[0-9]+)?";
 in {
   options.services.pimostat.sensor = {
@@ -112,6 +112,7 @@ in {
           "${pkgs.pimostat}/bin/sensor ${toString port} ${escapeShellArg file} ${toString interval}";
       };
     };
+
     systemd.services.pimostat-controller = mkIf cfg.controller.enable {
       description = "Pimostat controller service";
       after = [ "network.target" ];
@@ -122,6 +123,7 @@ in {
           "${pkgs.pimostat}/bin/controller ${toString port} ${sensor} ${temperature} ${hysteresis}";
       };
     };
+
     systemd.services.pimostat-actor = mkIf cfg.actor.enable {
       description = "Pimostat actor service";
       after = [ "network.target" ];
@@ -132,5 +134,9 @@ in {
           "${pkgs.pimostat}/bin/actor ${controller} ${gpio}";
       };
     };
+
+    networking.firewall.allowedTCPPorts =
+      (optional cfg.sensor.enable cfg.sensor.port) ++
+      (optional cfg.controller.enable cfg.controller.port);
   };
 }
