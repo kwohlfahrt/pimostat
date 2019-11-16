@@ -26,6 +26,14 @@ struct Actor {
     gpio: File,
 }
 
+impl Actor {
+    fn update(&mut self, state: bool) -> std::io::Result<()> {
+	write!(self.gpio, "{}", if state { "1" } else { "0" })?;
+	self.gpio.flush()?;
+	Ok(())
+    }
+}
+
 impl actor_capnp::actor::Server for Actor {
     fn toggle(
         &mut self,
@@ -33,7 +41,7 @@ impl actor_capnp::actor::Server for Actor {
         _: actor_capnp::actor::ToggleResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let state = pry!(params.get()).get_state();
-        match write!(self.gpio, "{}\n", if state { "1" } else { "0" }) {
+        match self.update(state) {
             Ok(()) => capnp::capability::Promise::ok(()),
             Err(e) => capnp::capability::Promise::err(capnp::Error::failed(format!("{}", e))),
         }
