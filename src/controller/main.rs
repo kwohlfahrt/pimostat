@@ -16,7 +16,7 @@ use tokio::runtime::current_thread;
 extern crate pimostat;
 use pimostat::{actor_capnp, controller_capnp, sensor_capnp, Error};
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 
 #[derive(Copy, Clone)]
 struct Config {
@@ -186,7 +186,7 @@ impl Future for State {
     }
 }
 
-fn main() {
+fn main() -> Result<(), std::io::Error> {
     let matches = App::new("Temperature Controller")
         .arg(Arg::with_name("port").required(true).index(1))
         .arg(Arg::with_name("sensor").required(true))
@@ -216,7 +216,7 @@ fn main() {
         sensor: matches
             .value_of("sensor")
             .unwrap()
-            .parse::<SocketAddr>()
+            .to_socket_addrs()?.next()
             .expect("Invalid sensor address"),
     };
 
@@ -224,4 +224,5 @@ fn main() {
 
     println!("Starting RPC system");
     current_thread::block_on_all(state).expect("Failed to run RPC client");
+    Ok(())
 }

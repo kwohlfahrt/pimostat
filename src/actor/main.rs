@@ -20,7 +20,7 @@ use pimostat::{actor_capnp, controller_capnp, Error};
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 
 struct Actor {
     gpio: File,
@@ -48,7 +48,7 @@ impl actor_capnp::actor::Server for Actor {
     }
 }
 
-fn main() {
+fn main() -> Result<(), std::io::Error> {
     let matches = App::new("Temperature Actor")
         .arg(Arg::with_name("controller").required(true).index(1))
         .arg(Arg::with_name("GPIO").required(true).index(2))
@@ -57,7 +57,7 @@ fn main() {
     let addr = matches
         .value_of("controller")
         .unwrap()
-        .parse::<SocketAddr>()
+        .to_socket_addrs()?.next()
         .expect("Invalid controller address");
     let gpio = OpenOptions::new()
         .read(false)
@@ -97,4 +97,5 @@ fn main() {
 
     println!("Starting RPC system");
     current_thread::block_on_all(rpc_system).expect("Failed to run RPC server");
+    Ok(())
 }
