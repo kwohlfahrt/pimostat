@@ -1,6 +1,8 @@
 extern crate capnp;
 extern crate tokio;
 
+use std::os::unix::io::FromRawFd;
+
 #[derive(Debug)]
 pub enum Error {
     CapnP(capnp::Error),
@@ -41,6 +43,26 @@ impl From<std::io::Error> for Error {
 }
 
 impl std::error::Error for Error {}
+
+pub fn get_systemd_socket() -> std::net::TcpListener {
+    let listen_pid = std::env::var("LISTEN_PID")
+	.map(
+	    |pid| pid.parse::<u32>().expect("Invalid LISTEN_PID")
+	)
+	.expect("LISTEN_PID is not set");
+    let listen_fds = std::env::var("LISTEN_FDS")
+	.map(
+	    |fd| fd.parse::<u32>().expect("Invalid LISTEN_FDS")
+	)
+	.expect("LISTEN_FDS is not set");
+    if listen_pid != std::process::id() {
+	panic!("LISTEN_PID does not match current PID");
+    }
+    if listen_fds != 1 {
+	panic!("LISTEN_FDS is not 1");
+    }
+    unsafe { std::net::TcpListener::from_raw_fd(3) }
+}
 
 pub mod actor_capnp {
     include!(concat!(env!("OUT_DIR"), "/actor_capnp.rs"));

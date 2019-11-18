@@ -102,36 +102,45 @@ in {
   };
 
   config = {
-    systemd.services.pimostat-sensor = mkIf cfg.sensor.enable {
+    systemd.services.pimostat-sensor = with cfg.sensor; mkIf enable {
       description = "w1-therm sensor service";
-      after = [ "network.target" ];
-      wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = with cfg.sensor;
-          "${pkgs.pimostat}/bin/sensor ${toString port} ${escapeShellArg file} ${toString interval}";
+        ExecStart = "${pkgs.pimostat}/bin/sensor ${escapeShellArg file} ${toString interval}";
       };
     };
 
-    systemd.services.pimostat-controller = mkIf cfg.controller.enable {
+    systemd.sockets.pimostat-sensor = with cfg.sensor; mkIf enable {
+      description = "Pimostat sensor socket";
+      socketConfig = {
+        ListenStream = "${toString port}";
+      };
+      wantedBy = [ "sockets.target" ];
+    };
+
+    systemd.services.pimostat-controller = with cfg.controller; mkIf enable {
       description = "Pimostat controller service";
-      after = [ "network.target" ];
-      wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = with cfg.controller;
-          "${pkgs.pimostat}/bin/controller ${toString port} ${sensor} ${temperature} ${hysteresis}";
+        ExecStart = "${pkgs.pimostat}/bin/controller ${sensor} ${temperature} ${hysteresis}";
       };
     };
 
-    systemd.services.pimostat-actor = mkIf cfg.actor.enable {
+    systemd.sockets.pimostat-controller = with cfg.controller; mkIf enable {
+      description = "Pimostat controller socket";
+      socketConfig = {
+        ListenStream = "${toString port}";
+      };
+      wantedBy = [ "sockets.target" ];
+    };
+
+    systemd.services.pimostat-actor = with cfg.actor; mkIf enable {
       description = "Pimostat actor service";
-      after = [ "network.target" ];
+      after = [ "sockets.target" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = with cfg.actor;
-          "${pkgs.pimostat}/bin/actor ${controller} ${gpio}";
+        ExecStart = "${pkgs.pimostat}/bin/actor ${controller} ${gpio}";
       };
     };
 

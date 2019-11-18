@@ -14,7 +14,7 @@ use tokio::io::AsyncRead;
 use tokio::runtime::current_thread;
 
 extern crate pimostat;
-use pimostat::{actor_capnp, controller_capnp, sensor_capnp, Error};
+use pimostat::{get_systemd_socket, actor_capnp, controller_capnp, sensor_capnp, Error};
 
 use std::net::{SocketAddr, ToSocketAddrs};
 
@@ -22,7 +22,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 struct Config {
     pub target: f32,
     pub hysteresis: f32,
-    pub addr: SocketAddr,
+    pub port: Option<u16>,
     pub sensor: SocketAddr,
 }
 
@@ -58,8 +58,21 @@ struct State {
 
 impl State {
     fn new(config: Config) -> Result<Self, Error> {
-        let incoming = tokio::net::TcpListener::bind(&config.addr)?
-            .incoming()
+	let listener = match config.port {
+	    None => Ok(get_systemd_socket()),
+	    Some(p) => {
+		let addrs = [
+		    SocketAddr::new("0.0.0.0".parse().unwrap(), p),
+		    SocketAddr::new("::0".parse().unwrap(), p),
+		];
+		std::net::TcpListener::bind(&addrs[..])
+	    },
+	}?;
+
+        let incoming = tokio::net::TcpListener::from_std(
+		listener, &tokio::reactor::Handle::default()
+	    )?
+	    .incoming()
             .map_err(Error::IO)
             .and_then(|s| {
                 if let Err(e) = s.set_nodelay(true) {
@@ -188,7 +201,10 @@ impl Future for State {
 
 fn main() -> Result<(), std::io::Error> {
     let matches = App::new("Temperature Controller")
-        .arg(Arg::with_name("port").required(true).index(1))
+        .arg(Arg::with_name("port")
+	     .short("p")
+	     .long("port")
+	     .takes_value(true))
         .arg(Arg::with_name("sensor").required(true))
         .arg(Arg::with_name("temperature").required(true))
         .arg(Arg::with_name("hysteresis"))
@@ -205,14 +221,9 @@ fn main() -> Result<(), std::io::Error> {
             .unwrap_or("1.5")
             .parse()
             .expect("Invalid hysteresis"),
-        addr: SocketAddr::new(
-            "0.0.0.0".parse().unwrap(),
-            matches
-                .value_of("port")
-                .unwrap()
-                .parse()
-                .expect("Invalid port"),
-        ),
+        port: matches
+	    .value_of("port")
+	    .map(|p| p.parse().expect("Invalid port")),
         sensor: matches
             .value_of("sensor")
             .unwrap()
