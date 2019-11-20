@@ -8,8 +8,8 @@ build = "build.rs"
 capnp = "0.10"
 capnp-rpc = "0.10"
 capnp-futures = "0.10"
-clap = "2.32"
-futures = "0.1.25"
+clap = "2.33"
+futures = "0.1.29"
 tokio = "0.1"
 
 [build-dependencies]
