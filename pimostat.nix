@@ -7,5 +7,5 @@ rustPlatform.buildRustPackage rec {
   src = ./.;
   nativeBuildInputs = [ capnproto ];
 
-  cargoSha256 = "04lcncgqbxcb5z26qbp5s5d8i092rr0c787pbh5igxc940fd7v4b";
+  cargoSha256 = "1h4lvrrh93b426xn6siblc8gk90n3b9rlpk0x0byisai74rby7wl";
 }
