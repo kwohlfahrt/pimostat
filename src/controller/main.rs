@@ -6,16 +6,20 @@ extern crate clap;
 use clap::{App, Arg};
 
 extern crate futures;
-use futures::{FutureExt, Stream};
+use futures::{stream::unfold, FutureExt, TryFutureExt, Stream, StreamExt, TryStreamExt};
 
 extern crate tokio;
 use tokio::io::split;
 use tokio::runtime;
 
+extern crate tokio_util;
+use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
+
 extern crate pimostat;
 use pimostat::{actor_capnp, controller_capnp, get_systemd_socket, sensor_capnp, Error};
 
-use core::{future::Future, task::Poll};
+use core::task::{Context, Poll};
+use core::{future::Future, pin::Pin};
 use std::net::{SocketAddr, ToSocketAddrs};
 
 #[derive(Copy, Clone)]
@@ -49,13 +53,12 @@ struct Actor {
     >,
 }
 
-// There would be fewer Box<dyn ...> with existential type aliases
 struct State {
     config: Config,
     on: bool,
     actor: Option<Actor>,
-    sensor: Box<dyn Stream<Item = Result<f32, Error>>>,
-    incoming: Box<dyn Stream<Item = Result<actor_capnp::actor::Client, Error>>>,
+    sensor: Pin<Box<dyn Stream<Item = Result<f32, Error>>>>,
+    incoming: Pin<Box<dyn Stream<Item = Result<actor_capnp::actor::Client, Error>>>>,
 }
 
 impl State {
@@ -72,25 +75,24 @@ impl State {
         }?;
 
         let incoming = tokio::net::TcpListener::from_std(listener)?
-            .incoming()
             .map_err(Error::IO)
-            .and_then(|s| {
-                if let Err(e) = s.set_nodelay(true) {
+	    .and_then(|s| {
+		if let Err(e) = s.set_nodelay(true) {
                     eprintln!("Warning: could not set nodelay ({})", e)
                 };
 
                 let read_opts = capnp::message::ReaderOptions::new();
-                capnp_futures::serialize::read_message(s, read_opts)
+                capnp_futures::serialize::read_message(s.compat(), read_opts)
                     .map_err(Error::CapnP)
-                    .and_then(|(s, msg)| {
+                    .and_then(|msg| {
                         msg.unwrap()
                             .get_root::<controller_capnp::hello::Reader>()?
                             .get_type()?;
 
                         let (reader, writer) = split(s);
                         let network = capnp_rpc::twoparty::VatNetwork::new(
-                            reader,
-                            writer,
+                            reader.compat(),
+                            writer.compat_write(),
                             capnp_rpc::rpc_twoparty_capnp::Side::Client,
                             Default::default(),
                         );
@@ -99,7 +101,9 @@ impl State {
                         let client =
                             rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
-                        tokio::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
+                        tokio::task::spawn_local(
+                            rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
+                        );
 
                         Ok(client)
                     })
@@ -107,32 +111,35 @@ impl State {
 
         let sensor = tokio::net::TcpStream::connect(&config.sensor)
             .map_err(Error::IO)
-            .map(move |s| {
-                stream::unfold(s, |s| {
+            .map_ok(|s| {
+                let (reader, _) = split(s);
+                // TODO: use capnp_futures::ReadStream
+                unfold(s, |s| async {
                     let read_opts = capnp::message::ReaderOptions::new();
-                    Some(
-                        capnp_futures::serialize::read_message(s, read_opts)
-                            .map_err(Error::CapnP)
-                            .map(|(s, msg)| {
-                                (
-                                    msg.unwrap()
-                                        .get_root::<sensor_capnp::state::Reader>()
-                                        .unwrap()
-                                        .get_value(),
-                                    s,
-                                )
-                            }),
-                    )
+                    let msg =
+                        capnp_futures::serialize::read_message(reader.compat(), read_opts).await;
+
+                    match msg {
+                        Ok(Some(r)) => {
+                            let temperature = r
+                                .get_root::<sensor_capnp::state::Reader>()
+                                .unwrap()
+                                .get_value();
+                            Some((Ok(temperature), s))
+                        }
+                        Ok(None) => None,
+                        Err(e) => Some((Err(Error::CapnP(e)), s)),
+                    }
                 })
             })
-            .flatten_stream();
+            .try_flatten_stream();
 
         Ok(Self {
             config,
             on: false,
             actor: None,
-            sensor: Box::new(sensor),
-            incoming: Box::new(incoming),
+            sensor: Box::pin(sensor),
+            incoming: Box::pin(incoming),
         })
     }
 }
@@ -140,30 +147,32 @@ impl State {
 impl Future for State {
     type Output = Result<(), Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let updated;
 
-        match self.sensor.poll()? {
-            Async::NotReady => {
+        match self.sensor.as_mut().poll_next(cx) {
+            Poll::Pending => {
                 updated = false;
             }
-            Async::Ready(None) => return Ok(Async::Ready(())),
-            Async::Ready(Some(value)) => {
+            Poll::Ready(None) => return Poll::Ready(Ok(())),
+            Poll::Ready(Some(value)) => {
+                let value = value?;
                 updated = true;
                 update(&mut self.on, value, &self.config);
             }
         }
 
         match self.actor.as_mut() {
-            None => match self.incoming.poll()? {
-                Async::NotReady => Ok(Async::NotReady),
-                Async::Ready(None) => Ok(Async::Ready(())),
-                Async::Ready(Some(a)) => {
+            None => match self.incoming.as_mut().poll_next(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(None) => Poll::Ready(Ok(())),
+                Poll::Ready(Some(a)) => {
+                    let a = a?;
                     self.actor = Some(Actor {
                         actor: a,
                         pending: None,
                     });
-                    self.poll()
+                    self.poll(cx)
                 }
             },
             Some(actor) => match actor.pending.as_mut() {
@@ -172,24 +181,24 @@ impl Future for State {
                         let mut req = actor.actor.toggle_request();
                         req.get().set_state(self.on);
                         actor.pending = Some(Box::new(req.send().promise));
-                        self.poll()
+                        self.poll(cx)
                     } else {
-                        // self.sensor.poll() returned NotReady
-                        Ok(Async::NotReady)
+                        // self.sensor.poll(cx) returned Pending
+                        Poll::Pending
                     }
                 }
-                Some(p) => match p.poll() {
-                    Ok(Async::NotReady) => Ok(Async::NotReady),
-                    Ok(Async::Ready(_)) => {
+                Some(p) => match p.poll(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(Ok(_)) => {
                         actor.pending = None;
-                        self.poll()
+                        self.poll(cx)
                     }
-                    Err(e) => {
+                    Poll::Ready(Err(e)) => {
                         if let capnp::ErrorKind::Disconnected = e.kind {
                             self.actor = None;
-                            self.poll()
+                            self.poll(cx)
                         } else {
-                            Err(Error::CapnP(e))
+                            Poll::Ready(Err(Error::CapnP(e)))
                         }
                     }
                 },
