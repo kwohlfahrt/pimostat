@@ -8,12 +8,13 @@ extern crate clap;
 use clap::{App, Arg};
 
 extern crate tokio;
+use tokio::io::split;
 use tokio::runtime;
 extern crate tokio_util;
-use tokio_util::compat::{Tokio02AsyncWriteCompatExt, Tokio02AsyncReadCompatExt};
+use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
 
 extern crate futures;
-use futures::{FutureExt, TryFutureExt};
+use futures::TryFutureExt;
 
 extern crate pimostat;
 use pimostat::{actor_capnp, controller_capnp, Error};
@@ -48,7 +49,7 @@ impl actor_capnp::actor::Server for Actor {
     }
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn main() -> Result<(), Error> {
     let matches = App::new("Temperature Actor")
         .arg(Arg::with_name("controller").required(true).index(1))
         .arg(Arg::with_name("GPIO").required(true).index(2))
@@ -64,7 +65,7 @@ fn main() -> Result<(), std::io::Error> {
         .read(false)
         .write(true)
         .open(matches.value_of("GPIO").unwrap())
-        .unwrap();
+        .expect("Could not open GPIO file");
 
     let mut rt = runtime::Builder::new()
         .basic_scheduler()
@@ -81,28 +82,26 @@ fn main() -> Result<(), std::io::Error> {
         msg.set_type(controller_capnp::hello::Type::Actor);
     }
 
-    let rpc_system = tokio::net::TcpStream::connect(&addr)
-        .map_err(Error::IO)
-        .and_then(|s| {
-            if let Err(e) = s.set_nodelay(true) {
-                eprintln!("Warning: could not set nodelay ({})", e)
-            };
-            let (reader, writer) = s.split();
-            capnp_futures::serialize::write_message(writer.compat_write(), builder)
-                .map_err(Error::CapnP)
-                .map_ok(move |()| (reader, writer))
-        })
-        .and_then(|(reader, writer)| {
-            let network = capnp_rpc::twoparty::VatNetwork::new(
-                reader.compat(),
-                writer.compat_write(),
-                capnp_rpc::rpc_twoparty_capnp::Side::Server,
-                Default::default(),
-            );
-            capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client)).map_err(Error::CapnP)
-        });
+    rt.block_on(async {
+        let s = tokio::net::TcpStream::connect(&addr).await?;
+        if let Err(e) = s.set_nodelay(true) {
+            eprintln!("Warning: could not set nodelay ({})", e)
+        };
+        let (reader, mut writer) = split(s);
 
-    println!("Starting RPC system");
-    rt.block_on(rpc_system).expect("Failed to run RPC server");
-    Ok(())
+        capnp_futures::serialize::write_message((&mut writer).compat_write(), builder)
+            .map_err(Error::CapnP)
+            .await?;
+
+        let network = capnp_rpc::twoparty::VatNetwork::new(
+            reader.compat(),
+            writer.compat_write(),
+            capnp_rpc::rpc_twoparty_capnp::Side::Server,
+            Default::default(),
+        );
+
+        capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client))
+            .map_err(Error::CapnP)
+            .await
+    })
 }

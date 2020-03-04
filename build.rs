@@ -7,6 +7,7 @@ fn main() {
         capnpc::CompilerCommand::new()
             .src_prefix("schema")
             .file(format!("schema/{}", schema))
-            .run().expect("Schema compiler command failed");
+            .run()
+            .expect("Schema compiler command failed");
     }
 }
