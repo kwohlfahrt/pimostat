@@ -1,6 +1,6 @@
 extern crate capnp;
-extern crate tokio;
 extern crate futures;
+extern crate tokio;
 
 use std::os::unix::io::FromRawFd;
 
@@ -47,20 +47,16 @@ impl std::error::Error for Error {}
 
 pub fn get_systemd_socket() -> std::net::TcpListener {
     let listen_pid = std::env::var("LISTEN_PID")
-	.map(
-	    |pid| pid.parse::<u32>().expect("Invalid LISTEN_PID")
-	)
-	.expect("LISTEN_PID is not set");
+        .map(|pid| pid.parse::<u32>().expect("Invalid LISTEN_PID"))
+        .expect("LISTEN_PID is not set");
     let listen_fds = std::env::var("LISTEN_FDS")
-	.map(
-	    |fd| fd.parse::<u32>().expect("Invalid LISTEN_FDS")
-	)
-	.expect("LISTEN_FDS is not set");
+        .map(|fd| fd.parse::<u32>().expect("Invalid LISTEN_FDS"))
+        .expect("LISTEN_FDS is not set");
     if listen_pid != std::process::id() {
-	panic!("LISTEN_PID does not match current PID");
+        panic!("LISTEN_PID does not match current PID");
     }
     if listen_fds != 1 {
-	panic!("LISTEN_FDS is not 1");
+        panic!("LISTEN_FDS is not 1");
     }
     unsafe { std::net::TcpListener::from_raw_fd(3) }
 }

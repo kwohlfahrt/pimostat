@@ -14,7 +14,7 @@ use tokio::io::AsyncRead;
 use tokio::runtime::current_thread;
 
 extern crate pimostat;
-use pimostat::{get_systemd_socket, actor_capnp, controller_capnp, sensor_capnp, Error};
+use pimostat::{actor_capnp, controller_capnp, get_systemd_socket, sensor_capnp, Error};
 
 use std::net::{SocketAddr, ToSocketAddrs};
 
@@ -58,54 +58,53 @@ struct State {
 
 impl State {
     fn new(config: Config) -> Result<Self, Error> {
-	let listener = match config.port {
-	    None => Ok(get_systemd_socket()),
-	    Some(p) => {
-		let addrs = [
-		    SocketAddr::new("0.0.0.0".parse().unwrap(), p),
-		    SocketAddr::new("::0".parse().unwrap(), p),
-		];
-		std::net::TcpListener::bind(&addrs[..])
-	    },
-	}?;
+        let listener = match config.port {
+            None => Ok(get_systemd_socket()),
+            Some(p) => {
+                let addrs = [
+                    SocketAddr::new("0.0.0.0".parse().unwrap(), p),
+                    SocketAddr::new("::0".parse().unwrap(), p),
+                ];
+                std::net::TcpListener::bind(&addrs[..])
+            }
+        }?;
 
-        let incoming = tokio::net::TcpListener::from_std(
-		listener, &tokio::reactor::Handle::default()
-	    )?
-	    .incoming()
-            .map_err(Error::IO)
-            .and_then(|s| {
-                if let Err(e) = s.set_nodelay(true) {
-                    eprintln!("Warning: could not set nodelay ({})", e)
-                };
+        let incoming =
+            tokio::net::TcpListener::from_std(listener, &tokio::reactor::Handle::default())?
+                .incoming()
+                .map_err(Error::IO)
+                .and_then(|s| {
+                    if let Err(e) = s.set_nodelay(true) {
+                        eprintln!("Warning: could not set nodelay ({})", e)
+                    };
 
-                let read_opts = capnp::message::ReaderOptions::new();
-                capnp_futures::serialize::read_message(s, read_opts)
-                    .map_err(Error::CapnP)
-                    .and_then(|(s, msg)| {
-                        msg.unwrap()
-                            .get_root::<controller_capnp::hello::Reader>()?
-                            .get_type()?;
+                    let read_opts = capnp::message::ReaderOptions::new();
+                    capnp_futures::serialize::read_message(s, read_opts)
+                        .map_err(Error::CapnP)
+                        .and_then(|(s, msg)| {
+                            msg.unwrap()
+                                .get_root::<controller_capnp::hello::Reader>()?
+                                .get_type()?;
 
-                        let (reader, writer) = s.split();
-                        let network = capnp_rpc::twoparty::VatNetwork::new(
-                            reader,
-                            writer,
-                            capnp_rpc::rpc_twoparty_capnp::Side::Client,
-                            Default::default(),
-                        );
+                            let (reader, writer) = s.split();
+                            let network = capnp_rpc::twoparty::VatNetwork::new(
+                                reader,
+                                writer,
+                                capnp_rpc::rpc_twoparty_capnp::Side::Client,
+                                Default::default(),
+                            );
 
-                        let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-                        let client =
-                            rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+                            let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+                            let client =
+                                rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
-                        current_thread::spawn(
-                            rpc_system.map_err(|e| eprintln!("RPC error ({})", e))
-                        );
+                            current_thread::spawn(
+                                rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
+                            );
 
-                        Ok(client)
-                    })
-            });
+                            Ok(client)
+                        })
+                });
 
         let sensor = tokio::net::TcpStream::connect(&config.sensor)
             .map_err(Error::IO)
@@ -144,17 +143,17 @@ impl Future for State {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-	let updated;
+        let updated;
 
         match self.sensor.poll()? {
             Async::NotReady => {
-		updated = false;
-	    }
+                updated = false;
+            }
             Async::Ready(None) => return Ok(Async::Ready(())),
             Async::Ready(Some(value)) => {
-		updated = true;
-		update(&mut self.on, value, &self.config);
-	    },
+                updated = true;
+                update(&mut self.on, value, &self.config);
+            }
         }
 
         match self.actor.as_mut() {
@@ -170,30 +169,32 @@ impl Future for State {
                 }
             },
             Some(actor) => match actor.pending.as_mut() {
-                None => if updated {
-                    let mut req = actor.actor.toggle_request();
-                    req.get().set_state(self.on);
-                    actor.pending = Some(Box::new(req.send().promise));
-                    self.poll()
-                } else {
-		    // self.sensor.poll() returned NotReady
-		    Ok(Async::NotReady)
-		},
+                None => {
+                    if updated {
+                        let mut req = actor.actor.toggle_request();
+                        req.get().set_state(self.on);
+                        actor.pending = Some(Box::new(req.send().promise));
+                        self.poll()
+                    } else {
+                        // self.sensor.poll() returned NotReady
+                        Ok(Async::NotReady)
+                    }
+                }
                 Some(p) => match p.poll() {
-		    Ok(Async::NotReady) => Ok(Async::NotReady),
-		    Ok(Async::Ready(_)) => {
-			actor.pending = None;
-			self.poll()
-		    },
-		    Err(e) => {
-			if let capnp::ErrorKind::Disconnected = e.kind {
-			    self.actor = None;
-			    self.poll()
-			} else {
-			    Err(Error::CapnP(e))
-			}
-		    }
-		},
+                    Ok(Async::NotReady) => Ok(Async::NotReady),
+                    Ok(Async::Ready(_)) => {
+                        actor.pending = None;
+                        self.poll()
+                    }
+                    Err(e) => {
+                        if let capnp::ErrorKind::Disconnected = e.kind {
+                            self.actor = None;
+                            self.poll()
+                        } else {
+                            Err(Error::CapnP(e))
+                        }
+                    }
+                },
             },
         }
     }
@@ -201,10 +202,12 @@ impl Future for State {
 
 fn main() -> Result<(), std::io::Error> {
     let matches = App::new("Temperature Controller")
-        .arg(Arg::with_name("port")
-	     .short("p")
-	     .long("port")
-	     .takes_value(true))
+        .arg(
+            Arg::with_name("port")
+                .short("p")
+                .long("port")
+                .takes_value(true),
+        )
         .arg(Arg::with_name("sensor").required(true))
         .arg(Arg::with_name("temperature").required(true))
         .arg(Arg::with_name("hysteresis"))
@@ -222,12 +225,13 @@ fn main() -> Result<(), std::io::Error> {
             .parse()
             .expect("Invalid hysteresis"),
         port: matches
-	    .value_of("port")
-	    .map(|p| p.parse().expect("Invalid port")),
+            .value_of("port")
+            .map(|p| p.parse().expect("Invalid port")),
         sensor: matches
             .value_of("sensor")
             .unwrap()
-            .to_socket_addrs()?.next()
+            .to_socket_addrs()?
+            .next()
             .expect("Invalid sensor address"),
     };
 

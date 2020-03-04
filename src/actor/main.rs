@@ -28,9 +28,9 @@ struct Actor {
 
 impl Actor {
     fn update(&mut self, state: bool) -> std::io::Result<()> {
-	write!(self.gpio, "{}", if state { "1" } else { "0" })?;
-	self.gpio.flush()?;
-	Ok(())
+        write!(self.gpio, "{}", if state { "1" } else { "0" })?;
+        self.gpio.flush()?;
+        Ok(())
     }
 }
 
@@ -57,7 +57,8 @@ fn main() -> Result<(), std::io::Error> {
     let addr = matches
         .value_of("controller")
         .unwrap()
-        .to_socket_addrs()?.next()
+        .to_socket_addrs()?
+        .next()
         .expect("Invalid controller address");
     let gpio = OpenOptions::new()
         .read(false)
