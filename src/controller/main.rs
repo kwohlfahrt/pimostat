@@ -6,16 +6,16 @@ extern crate clap;
 use clap::{App, Arg};
 
 extern crate futures;
-use futures::{stream, Async, Future, Poll, Stream};
+use futures::{FutureExt, Stream};
 
 extern crate tokio;
-use tokio::io::AsyncRead;
-// Capn'p clients are not Sync
-use tokio::runtime::current_thread;
+use tokio::io::split;
+use tokio::runtime;
 
 extern crate pimostat;
 use pimostat::{actor_capnp, controller_capnp, get_systemd_socket, sensor_capnp, Error};
 
+use core::{future::Future, task::Poll};
 use std::net::{SocketAddr, ToSocketAddrs};
 
 #[derive(Copy, Clone)]
@@ -40,8 +40,10 @@ struct Actor {
     pending: Option<
         Box<
             dyn Future<
-                Item = capnp::capability::Response<actor_capnp::actor::toggle_results::Owned>,
-                Error = capnp::Error,
+                Output = Result<
+                    capnp::capability::Response<actor_capnp::actor::toggle_results::Owned>,
+                    capnp::Error,
+                >,
             >,
         >,
     >,
@@ -52,8 +54,8 @@ struct State {
     config: Config,
     on: bool,
     actor: Option<Actor>,
-    sensor: Box<dyn Stream<Item = f32, Error = Error>>,
-    incoming: Box<dyn Stream<Item = actor_capnp::actor::Client, Error = Error>>,
+    sensor: Box<dyn Stream<Item = Result<f32, Error>>>,
+    incoming: Box<dyn Stream<Item = Result<actor_capnp::actor::Client, Error>>>,
 }
 
 impl State {
@@ -69,42 +71,39 @@ impl State {
             }
         }?;
 
-        let incoming =
-            tokio::net::TcpListener::from_std(listener, &tokio::reactor::Handle::default())?
-                .incoming()
-                .map_err(Error::IO)
-                .and_then(|s| {
-                    if let Err(e) = s.set_nodelay(true) {
-                        eprintln!("Warning: could not set nodelay ({})", e)
-                    };
+        let incoming = tokio::net::TcpListener::from_std(listener)?
+            .incoming()
+            .map_err(Error::IO)
+            .and_then(|s| {
+                if let Err(e) = s.set_nodelay(true) {
+                    eprintln!("Warning: could not set nodelay ({})", e)
+                };
 
-                    let read_opts = capnp::message::ReaderOptions::new();
-                    capnp_futures::serialize::read_message(s, read_opts)
-                        .map_err(Error::CapnP)
-                        .and_then(|(s, msg)| {
-                            msg.unwrap()
-                                .get_root::<controller_capnp::hello::Reader>()?
-                                .get_type()?;
+                let read_opts = capnp::message::ReaderOptions::new();
+                capnp_futures::serialize::read_message(s, read_opts)
+                    .map_err(Error::CapnP)
+                    .and_then(|(s, msg)| {
+                        msg.unwrap()
+                            .get_root::<controller_capnp::hello::Reader>()?
+                            .get_type()?;
 
-                            let (reader, writer) = s.split();
-                            let network = capnp_rpc::twoparty::VatNetwork::new(
-                                reader,
-                                writer,
-                                capnp_rpc::rpc_twoparty_capnp::Side::Client,
-                                Default::default(),
-                            );
+                        let (reader, writer) = split(s);
+                        let network = capnp_rpc::twoparty::VatNetwork::new(
+                            reader,
+                            writer,
+                            capnp_rpc::rpc_twoparty_capnp::Side::Client,
+                            Default::default(),
+                        );
 
-                            let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-                            let client =
-                                rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+                        let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+                        let client =
+                            rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
-                            current_thread::spawn(
-                                rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
-                            );
+                        tokio::spawn(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-                            Ok(client)
-                        })
-                });
+                        Ok(client)
+                    })
+            });
 
         let sensor = tokio::net::TcpStream::connect(&config.sensor)
             .map_err(Error::IO)
@@ -139,8 +138,7 @@ impl State {
 }
 
 impl Future for State {
-    type Item = ();
-    type Error = Error;
+    type Output = Result<(), Error>;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let updated;
@@ -237,7 +235,13 @@ fn main() -> Result<(), std::io::Error> {
 
     let state = State::new(cfg).expect("Failed to create state");
 
+    let mut rt = runtime::Builder::new()
+        .basic_scheduler()
+        .enable_all()
+        .build()
+        .expect("Could not construct runtime");
+
     println!("Starting RPC system");
-    current_thread::block_on_all(state).expect("Failed to run RPC client");
+    rt.block_on(state).expect("Failed to run RPC client");
     Ok(())
 }
