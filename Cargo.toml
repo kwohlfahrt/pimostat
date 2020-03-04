@@ -21,7 +21,7 @@ features = [ "compat" ]
 [dependencies.tokio]
 git = "https://github.com/tokio-rs/tokio.git"
 rev = "1eb6131"
-features = [ "time", "net", "fs", "rt-core", "io-util" ]
+features = [ "time", "net", "fs", "rt-core", "io-util", "stream" ]
 
 [build-dependencies]
 capnpc = "0.12"
