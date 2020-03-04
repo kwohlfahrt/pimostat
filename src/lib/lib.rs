@@ -1,5 +1,6 @@
 extern crate capnp;
 extern crate tokio;
+extern crate futures;
 
 use std::os::unix::io::FromRawFd;
 
@@ -7,9 +8,9 @@ use std::os::unix::io::FromRawFd;
 pub enum Error {
     CapnP(capnp::Error),
     Schema(capnp::NotInSchema),
-    Timer(tokio::timer::Error),
+    Timer(tokio::time::Error),
     IO(std::io::Error),
-    Send(futures::sync::mpsc::SendError<bool>),
+    Send(futures::channel::mpsc::SendError),
 }
 
 impl std::fmt::Display for Error {

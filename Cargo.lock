@@ -183,6 +183,7 @@ dependencies = [
  "capnp-rpc 0.12.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "capnpc 0.12.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -262,6 +263,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bytes 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-project-lite 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "slab 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
