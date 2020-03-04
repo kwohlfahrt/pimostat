@@ -8,12 +8,12 @@ extern crate clap;
 use clap::{App, Arg};
 
 extern crate tokio;
-use tokio::io::AsyncRead;
-// Capn'p clients are not Sync
-use tokio::runtime::current_thread;
+use tokio::runtime;
+extern crate tokio_util;
+use tokio_util::compat::{Tokio02AsyncWriteCompatExt, Tokio02AsyncReadCompatExt};
 
 extern crate futures;
-use futures::Future;
+use futures::{FutureExt, TryFutureExt};
 
 extern crate pimostat;
 use pimostat::{actor_capnp, controller_capnp, Error};
@@ -66,6 +66,12 @@ fn main() -> Result<(), std::io::Error> {
         .open(matches.value_of("GPIO").unwrap())
         .unwrap();
 
+    let mut rt = runtime::Builder::new()
+        .basic_scheduler()
+        .enable_all()
+        .build()
+        .expect("Could not construct runtime");
+
     let client =
         actor_capnp::actor::ToClient::new(Actor { gpio }).into_client::<capnp_rpc::Server>();
 
@@ -82,14 +88,14 @@ fn main() -> Result<(), std::io::Error> {
                 eprintln!("Warning: could not set nodelay ({})", e)
             };
             let (reader, writer) = s.split();
-            capnp_futures::serialize::write_message(writer, builder)
+            capnp_futures::serialize::write_message(writer.compat_write(), builder)
                 .map_err(Error::CapnP)
-                .map(|(writer, _)| (reader, writer))
+                .map_ok(move |()| (reader, writer))
         })
         .and_then(|(reader, writer)| {
             let network = capnp_rpc::twoparty::VatNetwork::new(
-                reader,
-                writer,
+                reader.compat(),
+                writer.compat_write(),
                 capnp_rpc::rpc_twoparty_capnp::Side::Server,
                 Default::default(),
             );
@@ -97,6 +103,6 @@ fn main() -> Result<(), std::io::Error> {
         });
 
     println!("Starting RPC system");
-    current_thread::block_on_all(rpc_system).expect("Failed to run RPC server");
+    rt.block_on(rpc_system).expect("Failed to run RPC server");
     Ok(())
 }
