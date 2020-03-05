@@ -248,15 +248,17 @@ fn main() -> Result<(), std::io::Error> {
             .expect("Invalid sensor address"),
     };
 
-    let state = State::new(cfg).expect("Failed to create state");
-
     let mut rt = runtime::Builder::new()
         .basic_scheduler()
         .enable_all()
         .build()
         .expect("Could not construct runtime");
+    let local = tokio::task::LocalSet::new();
 
+    let state = rt.enter(|| State::new(cfg).expect("Failed to create state"));
     println!("Starting RPC system");
-    rt.block_on(state).expect("Failed to run RPC client");
+    local
+        .block_on(&mut rt, state)
+        .expect("Failed to run RPC client");
     Ok(())
 }

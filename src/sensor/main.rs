@@ -42,7 +42,7 @@ fn main() -> Result<(), Error> {
         Some(p) => {
             let addrs = [
                 SocketAddr::new("0.0.0.0".parse().unwrap(), p),
-                SocketAddr::new("::0".parse().unwrap(), p),
+                SocketAddr::new("::".parse().unwrap(), p),
             ];
             std::net::TcpListener::bind(&addrs[..])
         }
