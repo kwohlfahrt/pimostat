@@ -3,17 +3,28 @@ name = "pimostat"
 version = "0.1.0"
 authors = ["Kai Wohlfahrt <kai.wohlfahrt@gmail.com>"]
 build = "build.rs"
+edition = "2018"
 
 [dependencies]
-capnp = "0.10"
-capnp-rpc = "0.10"
-capnp-futures = "0.10"
+capnp = "0.12"
+capnp-rpc = "0.12"
+capnp-futures = "0.12"
 clap = "2.33"
-futures = "0.1.29"
-tokio = "0.1"
+futures = "0.3"
+
+# Require PR#2117
+[dependencies.tokio-util]
+git = "https://github.com/tokio-rs/tokio.git"
+rev = "1eb6131"
+features = [ "compat" ]
+
+[dependencies.tokio]
+git = "https://github.com/tokio-rs/tokio.git"
+rev = "1eb6131"
+features = [ "time", "net", "fs", "rt-core", "rt-util", "io-util", "stream" ]
 
 [build-dependencies]
-capnpc = "0.10"
+capnpc = "0.12"
 
 [lib]
 name = "pimostat"
