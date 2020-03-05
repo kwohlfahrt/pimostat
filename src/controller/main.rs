@@ -78,45 +78,42 @@ impl State {
 
         let incoming = tokio::net::TcpListener::from_std(listener)?
             .map_err(Error::IO)
-            .and_then(|s| {
+            .and_then(|s| async {
                 if let Err(e) = s.set_nodelay(true) {
                     eprintln!("Warning: could not set nodelay ({})", e)
                 };
 
                 let read_opts = capnp::message::ReaderOptions::new();
+		let (mut reader, writer) = split(s);
 
-                capnp_futures::serialize::read_message(s.compat(), read_opts)
-                    .map(|msg| {
-                        msg.and_then(|msg| {
-                            msg.unwrap()
-                                .get_root::<controller_capnp::hello::Reader>()?
-                                .get_type()?;
+		let msg = capnp_futures::serialize::read_message((&mut reader).compat(), read_opts).await;
+		msg.and_then(move |msg| {
+		    msg.unwrap()
+			.get_root::<controller_capnp::hello::Reader>()?
+			.get_type()?;
 
-                            let (reader, writer) = split(s);
-                            let network = capnp_rpc::twoparty::VatNetwork::new(
-                                reader.compat(),
-                                writer.compat_write(),
-                                capnp_rpc::rpc_twoparty_capnp::Side::Client,
-                                Default::default(),
-                            );
+		    let network = capnp_rpc::twoparty::VatNetwork::new(
+			reader.compat(),
+			writer.compat_write(),
+			capnp_rpc::rpc_twoparty_capnp::Side::Client,
+			Default::default(),
+		    );
 
-                            let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-                            let client =
-                                rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+		    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+		    let client =
+			rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
-                            tokio::task::spawn_local(
-                                rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
-                            );
+		    tokio::task::spawn_local(
+			rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
+		    );
 
-                            Ok(client)
-                        })
-                    })
-                    .map_err(Error::CapnP)
-            });
+		    Ok(client)
+		}).map_err(Error::CapnP)
+	    });
 
-        let sensor = tokio::net::TcpStream::connect(&config.sensor)
-            .map_err(Error::IO)
-            .map_ok(|s| {
+	let sensor = tokio::net::TcpStream::connect(&config.sensor)
+	    .map_err(Error::IO)
+	    .map_ok(|s| {
                 let (reader, _) = split(s);
                 // TODO: use capnp_futures::ReadStream
                 unfold(s, |s| async {
