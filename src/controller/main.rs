@@ -6,7 +6,7 @@ extern crate clap;
 use clap::{App, Arg};
 
 extern crate futures;
-use futures::{stream::unfold, FutureExt, Stream, TryFutureExt, TryStreamExt};
+use futures::{stream::unfold, Stream, TryFutureExt, TryStreamExt};
 
 extern crate tokio;
 use tokio::io::split;
@@ -84,42 +84,44 @@ impl State {
                 };
 
                 let read_opts = capnp::message::ReaderOptions::new();
-		let (mut reader, writer) = split(s);
+                let (mut reader, writer) = split(s);
 
-		let msg = capnp_futures::serialize::read_message((&mut reader).compat(), read_opts).await;
-		msg.and_then(move |msg| {
-		    msg.unwrap()
-			.get_root::<controller_capnp::hello::Reader>()?
-			.get_type()?;
+                let msg =
+                    capnp_futures::serialize::read_message((&mut reader).compat(), read_opts).await;
+                msg.and_then(move |msg| {
+                    msg.unwrap()
+                        .get_root::<controller_capnp::hello::Reader>()?
+                        .get_type()?;
 
-		    let network = capnp_rpc::twoparty::VatNetwork::new(
-			reader.compat(),
-			writer.compat_write(),
-			capnp_rpc::rpc_twoparty_capnp::Side::Client,
-			Default::default(),
-		    );
+                    let network = capnp_rpc::twoparty::VatNetwork::new(
+                        reader.compat(),
+                        writer.compat_write(),
+                        capnp_rpc::rpc_twoparty_capnp::Side::Client,
+                        Default::default(),
+                    );
 
-		    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-		    let client =
-			rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+                    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+                    let client = rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
-		    tokio::task::spawn_local(
-			rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
-		    );
+                    tokio::task::spawn_local(
+                        rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
+                    );
 
-		    Ok(client)
-		}).map_err(Error::CapnP)
-	    });
+                    Ok(client)
+                })
+                .map_err(Error::CapnP)
+            });
 
-	let sensor = tokio::net::TcpStream::connect(&config.sensor)
-	    .map_err(Error::IO)
-	    .map_ok(|s| {
+        let sensor = tokio::net::TcpStream::connect(config.sensor)
+            .map_err(Error::IO)
+            .map_ok(|s| {
                 let (reader, _) = split(s);
                 // TODO: use capnp_futures::ReadStream
-                unfold(s, |s| async {
+                unfold(reader, |mut reader| async {
                     let read_opts = capnp::message::ReaderOptions::new();
                     let msg =
-                        capnp_futures::serialize::read_message(reader.compat(), read_opts).await;
+                        capnp_futures::serialize::read_message((&mut reader).compat(), read_opts)
+                            .await;
 
                     match msg {
                         Ok(Some(r)) => {
@@ -127,10 +129,10 @@ impl State {
                                 .get_root::<sensor_capnp::state::Reader>()
                                 .unwrap()
                                 .get_value();
-                            Some((Ok(temperature), s))
+                            Some((Ok(temperature), reader))
                         }
                         Ok(None) => None,
-                        Err(e) => Some((Err(Error::CapnP(e)), s)),
+                        Err(e) => Some((Err(Error::CapnP(e)), reader)),
                     }
                 })
             })
@@ -149,7 +151,7 @@ impl State {
 impl Future for State {
     type Output = Result<(), Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let updated;
 
         match self.sensor.as_mut().poll_next(cx) {
@@ -160,10 +162,12 @@ impl Future for State {
             Poll::Ready(Some(value)) => {
                 let value = value?;
                 updated = true;
-                update(&mut self.on, value, &self.config);
+                let config = self.config; // Avoid overlapping borrow of fields
+                update(&mut self.on, value, &config);
             }
         }
 
+        let on = self.on; // Avoid overlapping borrow of fields
         match self.actor.as_mut() {
             None => match self.incoming.as_mut().poll_next(cx) {
                 Poll::Pending => Poll::Pending,
@@ -181,7 +185,7 @@ impl Future for State {
                 None => {
                     if updated {
                         let mut req = actor.actor.toggle_request();
-                        req.get().set_state(self.on);
+                        req.get().set_state(on);
                         actor.pending = Some(Box::pin(req.send().promise));
                         self.poll(cx)
                     } else {
