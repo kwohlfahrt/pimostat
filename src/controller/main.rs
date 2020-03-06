@@ -1,6 +1,7 @@
+extern crate clap;
+
 use std::net::ToSocketAddrs;
 
-extern crate clap;
 use clap::{App, Arg};
 
 use pimostat::controller::run;

@@ -1,5 +1,7 @@
 extern crate clap;
+
 use clap::{App, Arg};
+
 use pimostat::actor::run;
 use pimostat::error::Error;
 

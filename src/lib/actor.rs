@@ -1,23 +1,22 @@
 extern crate capnp;
 extern crate capnp_futures;
 extern crate capnp_rpc;
-
-use capnp_rpc::pry;
-
-extern crate tokio;
-use tokio::io::split;
-use tokio::runtime;
-extern crate tokio_util;
-use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
-
 extern crate futures;
-use futures::TryFutureExt;
-
-use crate::{actor_capnp, controller_capnp, error::Error};
+extern crate tokio;
+extern crate tokio_util;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::net::SocketAddr;
+
+use capnp_rpc::pry;
+use futures::TryFutureExt;
+use tokio::io::split;
+use tokio::runtime;
+use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
+
+use crate::error::Error;
+use crate::{actor_capnp, controller_capnp};
 
 struct Actor {
     gpio: File,

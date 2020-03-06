@@ -1,5 +1,7 @@
 extern crate clap;
+
 use clap::{App, Arg};
+
 use pimostat::error::Error;
 use pimostat::sensor::run;
 
