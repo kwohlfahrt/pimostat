@@ -69,8 +69,8 @@ impl State {
             None => Ok(get_systemd_socket()),
             Some(p) => {
                 let addrs = [
+                    SocketAddr::new("::".parse().unwrap(), p),
                     SocketAddr::new("0.0.0.0".parse().unwrap(), p),
-                    SocketAddr::new("::0".parse().unwrap(), p),
                 ];
                 std::net::TcpListener::bind(&addrs[..])
             }
