@@ -21,5 +21,5 @@ fn main() -> Result<(), Error> {
         .expect("Invalid controller address");
     let gpio = matches.value_of("GPIO").unwrap();
 
-    run(addr, gpio)
+    run(addr, gpio.as_ref())
 }

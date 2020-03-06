@@ -7,6 +7,7 @@ mod parse;
 
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
+use std::path::Path;
 use std::time::Duration;
 
 use tokio::io::split;
@@ -18,7 +19,7 @@ use crate::sensor_capnp;
 use crate::socket::listen_on;
 use parse::parse;
 
-pub fn run(port: Option<u16>, source: &str, interval: u32) -> Result<(), Error> {
+pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error> {
     let listener = listen_on(port)?;
 
     let mut rt = runtime::Builder::new()

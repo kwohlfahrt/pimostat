@@ -12,6 +12,9 @@ capnp-futures = "0.12"
 clap = "2.33"
 futures = "0.3"
 
+[dev-dependencies]
+tempfile = "3"
+
 # Require PR#2117
 [dependencies.tokio-util]
 git = "https://github.com/tokio-rs/tokio.git"

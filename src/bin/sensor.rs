@@ -27,5 +27,5 @@ fn main() -> Result<(), Error> {
         .expect("Invalid interval");
     let source = matches.value_of("source").unwrap();
 
-    run(port, source, interval)
+    run(port, source.as_ref(), interval)
 }

@@ -8,6 +8,7 @@ extern crate tokio_util;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::net::SocketAddr;
+use std::path::Path;
 
 use capnp_rpc::pry;
 use futures::TryFutureExt;
@@ -44,7 +45,7 @@ impl actor_capnp::actor::Server for Actor {
     }
 }
 
-pub fn run(addr: SocketAddr, gpio: &str) -> Result<(), Error> {
+pub fn run(addr: SocketAddr, gpio: &Path) -> Result<(), Error> {
     let gpio = OpenOptions::new()
         .read(false)
         .write(true)

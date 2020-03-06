@@ -28,10 +28,30 @@ pub fn parse<R: BufRead>(r: &mut R) -> Result<f32, Error> {
 mod test {
     use super::*;
 
-    const SAMPLE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/w1_therm"));
+    const COLD: &str = concat!(
+        "a3 01 4b 46 7f ff 0e 10 d8 : crc=d8 YES\n",
+        "a3 01 4b 46 7f ff 0e 10 d8 t=10234\n",
+    );
+    const HOT: &str = concat!(
+        "a3 01 4b 46 7f ff 0e 10 d8 : crc=d8 YES\n",
+        "a3 01 4b 46 7f ff 0e 10 d8 t=32768\n",
+    );
+    const INVALID: &str = concat!(
+        "a3 01 4b 46 7f ff 0e 10 d8 : crc=d8 NO\n",
+        "a3 01 4b 46 7f ff 0e 10 d8 t=10234\n",
+    );
 
     #[test]
     fn sample_parse() {
-        assert_eq!(parse(&mut SAMPLE.as_bytes()).unwrap(), 32.768);
+        assert_eq!(parse(&mut HOT.as_bytes()).unwrap(), 32.768);
+        assert_eq!(parse(&mut COLD.as_bytes()).unwrap(), 10.234);
+    }
+
+    #[test]
+    fn error() {
+        if let Err(Error::ChecksumError) = parse(&mut INVALID.as_bytes()) {
+        } else {
+            panic!("Invalid data did not cause error");
+        }
     }
 }
