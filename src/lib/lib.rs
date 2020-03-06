@@ -16,3 +16,4 @@ mod socket;
 pub use socket::get_systemd_socket;
 
 pub mod sensor;
+pub mod actor;
