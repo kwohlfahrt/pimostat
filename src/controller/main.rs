@@ -16,7 +16,7 @@ extern crate tokio_util;
 use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
 
 extern crate pimostat;
-use pimostat::{actor_capnp, controller_capnp, get_systemd_socket, sensor_capnp, Error};
+use pimostat::{actor_capnp, controller_capnp, error::Error, get_systemd_socket, sensor_capnp};
 
 use core::task::{Context, Poll};
 use core::{future::Future, pin::Pin};

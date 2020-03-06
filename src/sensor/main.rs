@@ -12,7 +12,7 @@ extern crate tokio_util;
 use tokio_util::compat::Tokio02AsyncWriteCompatExt;
 
 extern crate pimostat;
-use pimostat::{get_systemd_socket, sensor_capnp, Error};
+use pimostat::{error::Error, get_systemd_socket, sensor_capnp};
 
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};

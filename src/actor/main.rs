@@ -17,7 +17,7 @@ extern crate futures;
 use futures::TryFutureExt;
 
 extern crate pimostat;
-use pimostat::{actor_capnp, controller_capnp, Error};
+use pimostat::{actor_capnp, controller_capnp, error::Error};
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
