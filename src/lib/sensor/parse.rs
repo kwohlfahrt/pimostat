@@ -28,7 +28,7 @@ pub fn parse<R: BufRead>(r: &mut R) -> Result<f32, Error> {
 mod test {
     use super::*;
 
-    const SAMPLE: &str = include_str!("../../tests/w1_therm");
+    const SAMPLE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/w1_therm"));
 
     #[test]
     fn sample_parse() {
