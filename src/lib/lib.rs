@@ -15,5 +15,6 @@ pub mod error;
 mod socket;
 pub use socket::get_systemd_socket;
 
-pub mod sensor;
 pub mod actor;
+pub mod controller;
+pub mod sensor;
