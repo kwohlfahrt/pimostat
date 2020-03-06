@@ -1,26 +1,22 @@
 extern crate capnp;
 extern crate capnp_futures;
 extern crate capnp_rpc;
-
-extern crate clap;
-use clap::{App, Arg};
-
 extern crate futures;
-use futures::{stream::unfold, Stream, TryFutureExt, TryStreamExt};
-
 extern crate tokio;
-use tokio::io::split;
-use tokio::runtime;
-
 extern crate tokio_util;
-use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
-
-extern crate pimostat;
-use pimostat::{actor_capnp, controller_capnp, get_systemd_socket, sensor_capnp, Error};
 
 use core::task::{Context, Poll};
 use core::{future::Future, pin::Pin};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
+
+use futures::{stream::unfold, Stream, TryFutureExt, TryStreamExt};
+use tokio::io::split;
+use tokio::runtime;
+use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
+
+use crate::error::Error;
+use crate::socket::listen_on;
+use crate::{actor_capnp, controller_capnp, sensor_capnp};
 
 #[derive(Copy, Clone)]
 struct Config {
@@ -65,16 +61,7 @@ struct State {
 
 impl State {
     fn new(config: Config) -> Result<Self, Error> {
-        let listener = match config.port {
-            None => Ok(get_systemd_socket()),
-            Some(p) => {
-                let addrs = [
-                    SocketAddr::new("0.0.0.0".parse().unwrap(), p),
-                    SocketAddr::new("::0".parse().unwrap(), p),
-                ];
-                std::net::TcpListener::bind(&addrs[..])
-            }
-        }?;
+        let listener = listen_on(config.port)?;
 
         let incoming = tokio::net::TcpListener::from_std(listener)?
             .map_err(Error::IO)
@@ -213,39 +200,17 @@ impl Future for State {
     }
 }
 
-fn main() -> Result<(), std::io::Error> {
-    let matches = App::new("Temperature Controller")
-        .arg(
-            Arg::with_name("port")
-                .short("p")
-                .long("port")
-                .takes_value(true),
-        )
-        .arg(Arg::with_name("sensor").required(true))
-        .arg(Arg::with_name("temperature").required(true))
-        .arg(Arg::with_name("hysteresis"))
-        .get_matches();
-
+pub fn run(
+    port: Option<u16>,
+    sensor: SocketAddr,
+    target: f32,
+    hysteresis: f32,
+) -> Result<(), Error> {
     let cfg = Config {
-        target: matches
-            .value_of("temperature")
-            .unwrap()
-            .parse()
-            .expect("Invalid temperature"),
-        hysteresis: matches
-            .value_of("hysteresis")
-            .unwrap_or("1.5")
-            .parse()
-            .expect("Invalid hysteresis"),
-        port: matches
-            .value_of("port")
-            .map(|p| p.parse().expect("Invalid port")),
-        sensor: matches
-            .value_of("sensor")
-            .unwrap()
-            .to_socket_addrs()?
-            .next()
-            .expect("Invalid sensor address"),
+        target,
+        hysteresis,
+        port,
+        sensor,
     };
 
     let mut rt = runtime::Builder::new()

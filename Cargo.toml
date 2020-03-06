@@ -12,6 +12,9 @@ capnp-futures = "0.12"
 clap = "2.33"
 futures = "0.3"
 
+[dev-dependencies]
+tempfile = "3"
+
 # Require PR#2117
 [dependencies.tokio-util]
 git = "https://github.com/tokio-rs/tokio.git"
@@ -32,12 +35,12 @@ path = "src/lib/lib.rs"
 
 [[bin]]
 name = "controller"
-path = "src/controller/main.rs"
+path = "src/bin/controller.rs"
 
 [[bin]]
 name = "sensor"
-path = "src/sensor/main.rs"
+path = "src/bin/sensor.rs"
 
 [[bin]]
 name = "actor"
-path = "src/actor/main.rs"
+path = "src/bin/actor.rs"

@@ -1,27 +1,23 @@
 extern crate capnp;
 extern crate capnp_futures;
 extern crate capnp_rpc;
-
-use capnp_rpc::pry;
-
-extern crate clap;
-use clap::{App, Arg};
-
-extern crate tokio;
-use tokio::io::split;
-use tokio::runtime;
-extern crate tokio_util;
-use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
-
 extern crate futures;
-use futures::TryFutureExt;
-
-extern crate pimostat;
-use pimostat::{actor_capnp, controller_capnp, Error};
+extern crate tokio;
+extern crate tokio_util;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::net::ToSocketAddrs;
+use std::net::SocketAddr;
+use std::path::Path;
+
+use capnp_rpc::pry;
+use futures::TryFutureExt;
+use tokio::io::split;
+use tokio::runtime;
+use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
+
+use crate::error::Error;
+use crate::{actor_capnp, controller_capnp};
 
 struct Actor {
     gpio: File,
@@ -49,22 +45,11 @@ impl actor_capnp::actor::Server for Actor {
     }
 }
 
-fn main() -> Result<(), Error> {
-    let matches = App::new("Temperature Actor")
-        .arg(Arg::with_name("controller").required(true).index(1))
-        .arg(Arg::with_name("GPIO").required(true).index(2))
-        .get_matches();
-
-    let addr = matches
-        .value_of("controller")
-        .unwrap()
-        .to_socket_addrs()?
-        .next()
-        .expect("Invalid controller address");
+pub fn run(addr: SocketAddr, gpio: &Path) -> Result<(), Error> {
     let gpio = OpenOptions::new()
         .read(false)
         .write(true)
-        .open(matches.value_of("GPIO").unwrap())
+        .open(gpio)
         .expect("Could not open GPIO file");
 
     let mut rt = runtime::Builder::new()
