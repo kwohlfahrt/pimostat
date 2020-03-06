@@ -32,12 +32,12 @@ path = "src/lib/lib.rs"
 
 [[bin]]
 name = "controller"
-path = "src/controller/main.rs"
+path = "src/bin/controller.rs"
 
 [[bin]]
 name = "sensor"
-path = "src/sensor/main.rs"
+path = "src/bin/sensor.rs"
 
 [[bin]]
 name = "actor"
-path = "src/actor/main.rs"
+path = "src/bin/actor.rs"
