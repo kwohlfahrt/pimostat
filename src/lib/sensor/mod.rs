@@ -11,6 +11,7 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
+use futures::future::ok;
 use futures::stream::{StreamExt, TryStreamExt};
 use tokio::io::split;
 use tokio::runtime;
@@ -34,23 +35,16 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
     let mut source = BufReader::new(File::open(source)?);
     let (tx, rx) = channel(parse(&mut source)?);
 
-    rt.spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(interval as u64));
-        loop {
-            interval.tick().await;
-            if let Err(e) = source.seek(SeekFrom::Start(0)) {
-                eprintln!("{}", e);
-                break;
-            };
-            if let Err(e) = parse(&mut source)
-                .map_err(Error::from)
-                .and_then(|value| tx.broadcast(value).map_err(Error::from))
-            {
-                eprintln!("{}", e);
-                break;
-            }
-        }
-    });
+    let interval = rt.enter(|| tokio::time::interval(Duration::from_secs(interval as u64)));
+    rt.spawn(
+        interval
+            .map(move |_| {
+                source.seek(SeekFrom::Start(0))?;
+                let value = parse(&mut source).map_err(Error::from)?;
+                tx.broadcast(value).map_err(Error::from)
+            })
+            .try_for_each(ok),
+    );
 
     rt.block_on(async {
         let mut listener = tokio::net::TcpListener::from_std(listener)?;
