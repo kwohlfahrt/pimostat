@@ -9,6 +9,7 @@ pub enum Error {
     Timer(tokio::time::Error),
     IO(std::io::Error),
     Send(futures::channel::mpsc::SendError),
+    Checksum,
 }
 
 impl std::fmt::Display for Error {
@@ -19,6 +20,7 @@ impl std::fmt::Display for Error {
             Error::Schema(e) => write!(fmt, "CapnP({})", e),
             Error::Send(e) => write!(fmt, "Send({})", e),
             Error::Timer(e) => write!(fmt, "Timer({})", e),
+            Error::Checksum => write!(fmt, "Checksum"),
         }
     }
 }
@@ -38,6 +40,15 @@ impl From<capnp::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Error::IO(e)
+    }
+}
+
+impl From<super::sensor::parse::Error> for Error {
+    fn from(e: super::sensor::parse::Error) -> Self {
+        match e {
+            super::sensor::parse::Error::ChecksumError => Error::Checksum,
+            super::sensor::parse::Error::IO(e) => Error::IO(e),
+        }
     }
 }
 

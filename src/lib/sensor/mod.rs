@@ -1,17 +1,20 @@
 extern crate capnp;
 extern crate capnp_rpc;
+extern crate futures;
 extern crate tokio;
 extern crate tokio_util;
 
-mod parse;
+pub mod parse;
 
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
+use futures::stream::{StreamExt, TryStreamExt};
 use tokio::io::split;
 use tokio::runtime;
+use tokio::sync::watch::channel;
 use tokio_util::compat::Tokio02AsyncWriteCompatExt;
 
 use crate::error::Error;
@@ -28,25 +31,34 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
         .build()
         .expect("Could not construct runtime");
 
+    let mut source = BufReader::new(File::open(source)?);
+    let (tx, rx) = channel(parse(&mut source)?);
+
+    rt.spawn(async move {
+	let mut interval = tokio::time::interval(Duration::from_secs(interval as u64));
+	loop {
+	    interval.tick().await;
+	    source.seek(SeekFrom::Start(0)).unwrap();
+	    tx.broadcast(parse(&mut source).unwrap()).unwrap();
+	}
+    });
+
     rt.block_on(async {
         let mut listener = tokio::net::TcpListener::from_std(listener)?;
 
         loop {
             let (s, _) = listener.accept().await?;
             let (_, mut writer) = split(s);
-            // Inefficient, we open the file for each incoming stream
-            let mut source = BufReader::new(File::open(source)?);
-            let mut interval = tokio::time::interval(Duration::from_secs(interval as u64));
+            let mut rx = rx.clone();
 
             tokio::spawn(async move {
                 loop {
-                    interval.tick().await;
+                    let value = rx.recv().await.unwrap();
 
                     let mut msg_builder = capnp::message::Builder::new_default();
                     {
                         let mut msg = msg_builder.init_root::<sensor_capnp::state::Builder>();
-                        source.seek(SeekFrom::Start(0)).unwrap();
-                        msg.set_value(parse(&mut source).unwrap());
+                        msg.set_value(value);
                     }
 
                     if let Err(e) = capnp_futures::serialize::write_message(

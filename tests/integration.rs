@@ -58,5 +58,5 @@ fn test_all() {
     sleep(Duration::from_secs(1));
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
-    assert_eq!(read(&gpio.path()).unwrap(), "101001".as_bytes());
+    assert_eq!(read(&gpio.path()).unwrap(), "1101001".as_bytes());
 }
