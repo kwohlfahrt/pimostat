@@ -2,7 +2,8 @@ use std::io::{self, BufRead};
 
 #[derive(Debug)]
 pub enum Error {
-    ChecksumError,
+    Checksum,
+    Parse,
     IO(io::Error),
 }
 
@@ -12,16 +13,22 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<std::num::ParseIntError> for Error {
+    fn from(_: std::num::ParseIntError) -> Error {
+        Error::Parse
+    }
+}
+
 pub fn parse<R: BufRead>(r: &mut R) -> Result<f32, Error> {
     let mut s = String::with_capacity(40);
     r.read_line(&mut s)?;
     if !s.ends_with("YES\n") {
-        return Err(Error::ChecksumError);
+        return Err(Error::Checksum);
     };
 
     r.read_line(&mut s)?;
-    let t = s.rsplit("t=").next().unwrap().trim();
-    Ok(t.parse::<i32>().unwrap() as f32 / 1000.0)
+    let t = s.rsplit("t=").next().ok_or(Error::Parse)?.trim();
+    Ok(t.parse::<i32>()? as f32 / 1000.0)
 }
 
 #[cfg(test)]
@@ -49,7 +56,7 @@ mod test {
 
     #[test]
     fn error() {
-        if let Err(Error::ChecksumError) = parse(&mut INVALID.as_bytes()) {
+        if let Err(Error::Checksum) = parse(&mut INVALID.as_bytes()) {
         } else {
             panic!("Invalid data did not cause error");
         }

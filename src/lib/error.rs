@@ -9,6 +9,7 @@ pub enum Error {
     IO(std::io::Error),
     Send,
     Checksum,
+    Parse,
 }
 
 impl std::fmt::Display for Error {
@@ -20,6 +21,7 @@ impl std::fmt::Display for Error {
             Error::Send => write!(fmt, "Send"),
             Error::Timer(e) => write!(fmt, "Timer({})", e),
             Error::Checksum => write!(fmt, "Checksum"),
+            Error::Parse => write!(fmt, "Parse"),
         }
     }
 }
@@ -51,7 +53,8 @@ impl<T> From<tokio::sync::watch::error::SendError<T>> for Error {
 impl From<super::sensor::parse::Error> for Error {
     fn from(e: super::sensor::parse::Error) -> Self {
         match e {
-            super::sensor::parse::Error::ChecksumError => Error::Checksum,
+            super::sensor::parse::Error::Checksum => Error::Checksum,
+            super::sensor::parse::Error::Parse => Error::Parse,
             super::sensor::parse::Error::IO(e) => Error::IO(e),
         }
     }
