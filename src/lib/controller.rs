@@ -7,6 +7,7 @@ extern crate tokio_util;
 
 use std::net::SocketAddr;
 
+use capnp_futures::serialize::read_message;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use tokio::io::split;
 use tokio::runtime;
@@ -82,12 +83,12 @@ pub fn run(
             let (mut reader, writer) = split(s);
             let mut rx = rx.clone();
 
-            let msg =
-                capnp_futures::serialize::read_message((&mut reader).compat(), Default::default())
-                    .await?;
-            msg.unwrap()
-                .get_root::<controller_capnp::hello::Reader>()?
-                .get_type()?;
+            if let Some(msg) = read_message((&mut reader).compat(), Default::default()).await? {
+		msg.get_root::<controller_capnp::hello::Reader>()?
+		    .get_type()?;
+	    } else {
+                return Ok(());
+            }
 
             let network = capnp_rpc::twoparty::VatNetwork::new(
                 reader.compat(),

@@ -39,7 +39,8 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
     let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
 
     rt.spawn(
-        interval.skip(1)
+        interval
+            .skip(1)
             .map(move |_| {
                 source.seek(SeekFrom::Start(0))?;
                 let value = parse(&mut source).map_err(Error::from)?;
