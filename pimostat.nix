@@ -12,7 +12,7 @@ in rustPlatform.buildRustPackage rec {
   src = ./.;
   nativeBuildInputs = [ capnproto ];
 
-  cargoSha256 = "1493lys8kz18yr0hlxvsnaiib90mz0aqmws196anhqndykc0lggr";
+  cargoSha256 = "14mask7jv2vhdhbc1zf4444mrdd08ibqsmcjwwkiybz6czss45zy";
 
   meta = with stdenv.lib; {
     platforms = platforms.all;
