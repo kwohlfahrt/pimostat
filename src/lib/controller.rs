@@ -5,13 +5,12 @@ extern crate futures;
 extern crate tokio;
 extern crate tokio_util;
 
-use core::task::{Context, Poll};
-use core::{future::Future, pin::Pin};
 use std::net::SocketAddr;
 
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use tokio::io::split;
 use tokio::runtime;
+use tokio::sync::watch::channel;
 use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
 
 use crate::error::Error;
@@ -27,164 +26,11 @@ struct Config {
 }
 
 #[allow(unused)]
-fn update(on: &mut bool, temperature: f32, cfg: &Config) {
-    if temperature > cfg.target {
+fn update(on: &mut bool, temperature: f32, target: f32, hysteresis: f32) {
+    if temperature > target {
         *on = false;
-    } else if temperature < (cfg.target - cfg.hysteresis) {
+    } else if temperature < (target - hysteresis) {
         *on = true;
-    }
-}
-
-struct Actor {
-    actor: actor_capnp::actor::Client,
-    pending: Option<
-        Pin<
-            Box<
-                dyn Future<
-                    Output = Result<
-                        capnp::capability::Response<actor_capnp::actor::toggle_results::Owned>,
-                        capnp::Error,
-                    >,
-                >,
-            >,
-        >,
-    >,
-}
-
-struct State {
-    config: Config,
-    on: bool,
-    actor: Option<Actor>,
-    sensor: Pin<Box<dyn Stream<Item = Result<f32, Error>>>>,
-    incoming: Pin<Box<dyn Stream<Item = Result<actor_capnp::actor::Client, Error>>>>,
-}
-
-impl State {
-    fn new(config: Config) -> Result<Self, Error> {
-        let listener = listen_on(config.port)?;
-
-        let incoming = tokio::net::TcpListener::from_std(listener)?
-            .map_err(Error::IO)
-            .and_then(|s| async {
-                if let Err(e) = s.set_nodelay(true) {
-                    eprintln!("Warning: could not set nodelay ({})", e)
-                };
-
-                let read_opts = capnp::message::ReaderOptions::new();
-                let (mut reader, writer) = split(s);
-
-                let msg =
-                    capnp_futures::serialize::read_message((&mut reader).compat(), read_opts).await;
-                msg.and_then(move |msg| {
-                    msg.unwrap()
-                        .get_root::<controller_capnp::hello::Reader>()?
-                        .get_type()?;
-
-                    let network = capnp_rpc::twoparty::VatNetwork::new(
-                        reader.compat(),
-                        writer.compat_write(),
-                        capnp_rpc::rpc_twoparty_capnp::Side::Client,
-                        Default::default(),
-                    );
-
-                    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-                    let client = rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
-
-                    tokio::task::spawn_local(
-                        rpc_system.map_err(|e| eprintln!("RPC error ({})", e)),
-                    );
-
-                    Ok(client)
-                })
-                .map_err(Error::CapnP)
-            });
-
-        let sensor = tokio::net::TcpStream::connect(config.sensor)
-            .map_err(Error::IO)
-            .map_ok(|s| {
-                let (reader, _) = split(s);
-                capnp_futures::ReadStream::new(reader.compat(), Default::default())
-                    .map_ok(|msg| {
-                        msg.get_root::<sensor_capnp::state::Reader>()
-                            .unwrap()
-                            .get_value()
-                    })
-                    .map_err(Error::from)
-            })
-            .try_flatten_stream();
-
-        Ok(Self {
-            config,
-            on: false,
-            actor: None,
-            sensor: Box::pin(sensor),
-            incoming: Box::pin(incoming),
-        })
-    }
-}
-
-impl Future for State {
-    type Output = Result<(), Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let updated;
-
-        match self.sensor.as_mut().poll_next(cx) {
-            Poll::Pending => {
-                updated = false;
-            }
-            Poll::Ready(None) => return Poll::Ready(Ok(())),
-            Poll::Ready(Some(value)) => {
-                let value = value?;
-                updated = true;
-                let config = self.config; // Avoid overlapping borrow of fields
-                update(&mut self.on, value, &config);
-            }
-        }
-
-        let on = self.on; // Avoid overlapping borrow of fields
-        match self.actor.as_mut() {
-            None => match self.incoming.as_mut().poll_next(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(None) => Poll::Ready(Ok(())),
-                Poll::Ready(Some(a)) => {
-                    let a = a?;
-                    self.actor = Some(Actor {
-                        actor: a,
-                        pending: None,
-                    });
-                    self.poll(cx)
-                }
-            },
-            Some(actor) => match actor.pending.as_mut() {
-                None => {
-                    if updated {
-                        let mut req = actor.actor.toggle_request();
-                        req.get().set_state(on);
-                        actor.pending = Some(Box::pin(req.send().promise));
-                        self.poll(cx)
-                    } else {
-                        // self.sensor.poll(cx) returned Pending
-                        Poll::Pending
-                    }
-                }
-                Some(p) => match p.as_mut().poll(cx) {
-                    Poll::Pending => Poll::Pending,
-                    Poll::Ready(Ok(_)) => {
-                        actor.pending = None;
-                        self.poll(cx)
-                    }
-                    Poll::Ready(Err(e)) => {
-                        if let capnp::ErrorKind::Disconnected = e.kind {
-                            self.actor = None;
-                            self.poll(cx)
-                        } else {
-                            Poll::Ready(Err(Error::CapnP(e)))
-                        }
-                    }
-                },
-            },
-        }
     }
 }
 
@@ -194,24 +40,74 @@ pub fn run(
     target: f32,
     hysteresis: f32,
 ) -> Result<(), Error> {
-    let cfg = Config {
-        target,
-        hysteresis,
-        port,
-        sensor,
-    };
-
     let mut rt = runtime::Builder::new()
         .basic_scheduler()
         .enable_all()
         .build()
         .expect("Could not construct runtime");
     let local = tokio::task::LocalSet::new();
+    let (tx, rx) = channel(false);
 
-    let state = rt.enter(|| State::new(cfg).expect("Failed to create state"));
-    println!("Starting RPC system");
-    local
-        .block_on(&mut rt, state)
-        .expect("Failed to run RPC client");
-    Ok(())
+    local.spawn_local(
+        tokio::net::TcpStream::connect(sensor)
+            .map_err(Error::from)
+            .and_then(move |s| async move {
+                if let Err(e) = s.set_nodelay(true) {
+                    eprintln!("Warning: could not set nodelay ({})", e)
+                };
+                let (reader, _) = split(s);
+                let mut messages =
+                    capnp_futures::ReadStream::new(reader.compat(), Default::default());
+
+                let mut on = false;
+                while let Some(msg) = messages.next().await {
+                    let temperature = msg?.get_root::<sensor_capnp::state::Reader>()?.get_value();
+                    update(&mut on, temperature, target, hysteresis);
+                    tx.broadcast(on).map_err(Error::from)?;
+                }
+                Ok(())
+            }),
+    );
+
+    let listener = listen_on(port)?;
+    let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
+
+    local.block_on(
+        &mut rt,
+        listener.map_err(Error::from).try_for_each(|s| async {
+            if let Err(e) = s.set_nodelay(true) {
+                eprintln!("Warning: could not set nodelay ({})", e)
+            };
+
+            let (mut reader, writer) = split(s);
+            let mut rx = rx.clone();
+
+            let msg =
+                capnp_futures::serialize::read_message((&mut reader).compat(), Default::default())
+                    .await?;
+            msg.unwrap()
+                .get_root::<controller_capnp::hello::Reader>()?
+                .get_type()?;
+
+            let network = capnp_rpc::twoparty::VatNetwork::new(
+                reader.compat(),
+                writer.compat_write(),
+                capnp_rpc::rpc_twoparty_capnp::Side::Client,
+                Default::default(),
+            );
+
+            let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+            let actor: actor_capnp::actor::Client =
+                rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+
+            local.spawn_local(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
+
+            while let Some(on) = rx.next().await {
+                let mut req = actor.toggle_request();
+                req.get().set_state(on);
+                req.send().promise.await?.get()?;
+            }
+            Ok(())
+        }),
+    )
 }
