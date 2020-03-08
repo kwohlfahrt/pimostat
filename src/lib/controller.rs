@@ -9,7 +9,7 @@ use core::task::{Context, Poll};
 use core::{future::Future, pin::Pin};
 use std::net::SocketAddr;
 
-use futures::{stream::unfold, Stream, TryFutureExt, TryStreamExt};
+use futures::{Stream, TryFutureExt, TryStreamExt};
 use tokio::io::split;
 use tokio::runtime;
 use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
@@ -103,25 +103,13 @@ impl State {
             .map_err(Error::IO)
             .map_ok(|s| {
                 let (reader, _) = split(s);
-                // TODO: use capnp_futures::ReadStream
-                unfold(reader, |mut reader| async {
-                    let read_opts = capnp::message::ReaderOptions::new();
-                    let msg =
-                        capnp_futures::serialize::read_message((&mut reader).compat(), read_opts)
-                            .await;
-
-                    match msg {
-                        Ok(Some(r)) => {
-                            let temperature = r
-                                .get_root::<sensor_capnp::state::Reader>()
-                                .unwrap()
-                                .get_value();
-                            Some((Ok(temperature), reader))
-                        }
-                        Ok(None) => None,
-                        Err(e) => Some((Err(Error::CapnP(e)), reader)),
-                    }
-                })
+                capnp_futures::ReadStream::new(reader.compat(), Default::default())
+                    .map_ok(|msg| {
+                        msg.get_root::<sensor_capnp::state::Reader>()
+                            .unwrap()
+                            .get_value()
+                    })
+                    .map_err(Error::from)
             })
             .try_flatten_stream();
 
