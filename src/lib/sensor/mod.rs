@@ -36,6 +36,8 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
     let (tx, rx) = channel(parse(&mut source)?);
 
     let interval = rt.enter(|| tokio::time::interval(Duration::from_secs(interval as u64)));
+    let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
+
     rt.spawn(
         interval
             .map(move |_| {
@@ -46,37 +48,29 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
             .try_for_each(ok),
     );
 
-    rt.block_on(async {
-        let mut listener = tokio::net::TcpListener::from_std(listener)?;
+    rt.block_on(listener.map_err(Error::from).try_for_each(|s| {
+        let (_, mut writer) = split(s);
+        let mut rx = rx.clone();
 
-        loop {
-            let (s, _) = listener.accept().await?;
-            let (_, mut writer) = split(s);
-            let mut rx = rx.clone();
-
-            tokio::spawn(async move {
-                loop {
-                    if let Some(value) = rx.recv().await {
-                        let mut msg_builder = capnp::message::Builder::new_default();
-                        {
-                            let mut msg = msg_builder.init_root::<sensor_capnp::state::Builder>();
-                            msg.set_value(value);
-                        }
-
-                        if let Err(e) = capnp_futures::serialize::write_message(
-                            (&mut writer).compat_write(),
-                            msg_builder,
-                        )
-                        .await
-                        {
-                            eprintln!("Could not send message ({})", e);
-                            break;
-                        };
-                    } else {
-                        break;
-                    };
+        tokio::spawn(async move {
+            while let Some(value) = rx.next().await {
+                let mut msg_builder = capnp::message::Builder::new_default();
+                {
+                    let mut msg = msg_builder.init_root::<sensor_capnp::state::Builder>();
+                    msg.set_value(value);
                 }
-            });
-        }
-    })
+
+                if let Err(e) = capnp_futures::serialize::write_message(
+                    (&mut writer).compat_write(),
+                    msg_builder,
+                )
+                .await
+                {
+                    eprintln!("Could not send message ({})", e);
+                    break;
+                }
+            }
+        });
+        ok(())
+    }))
 }
