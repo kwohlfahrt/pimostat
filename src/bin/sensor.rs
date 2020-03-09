@@ -1,5 +1,7 @@
 extern crate clap;
 
+use std::path::Path;
+
 use clap::{App, Arg};
 
 use pimostat::error::Error;
@@ -15,11 +17,13 @@ fn main() -> Result<(), Error> {
         )
         .arg(Arg::with_name("source").required(true))
         .arg(Arg::with_name("interval").required(true))
+        .arg(Arg::with_name("certificate").long("cert").takes_value(true))
         .get_matches();
 
     let port: Option<u16> = matches
         .value_of("port")
         .map(|p| p.parse().expect("Invalid port"));
+    let cert = matches.value_of("certificate").map(Path::new);
     let interval: u32 = matches
         .value_of("interval")
         .unwrap()
@@ -27,5 +31,5 @@ fn main() -> Result<(), Error> {
         .expect("Invalid interval");
     let source = matches.value_of("source").unwrap();
 
-    run(port, source.as_ref(), interval)
+    run(port, source.as_ref(), interval, cert)
 }

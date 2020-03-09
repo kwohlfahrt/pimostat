@@ -1,12 +1,14 @@
 extern crate capnp;
 extern crate capnp_rpc;
 extern crate futures;
+extern crate native_tls;
 extern crate tokio;
+extern crate tokio_tls;
 extern crate tokio_util;
 
 pub mod parse;
 
-use std::fs::File;
+use std::fs::{read, File};
 use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
@@ -23,7 +25,12 @@ use crate::sensor_capnp;
 use crate::socket::listen_on;
 use parse::parse;
 
-pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error> {
+pub fn run(
+    port: Option<u16>,
+    source: &Path,
+    interval: u32,
+    cert: Option<&Path>,
+) -> Result<(), Error> {
     let listener = listen_on(port)?;
 
     let mut rt = runtime::Builder::new()
@@ -38,6 +45,9 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
     let interval = rt.enter(|| tokio::time::interval(Duration::from_secs(interval as u64)));
     let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
 
+    let identity = native_tls::Identity::from_pkcs12(&read(cert.unwrap())?, "").unwrap();
+    let acceptor: tokio_tls::TlsAcceptor = native_tls::TlsAcceptor::new(identity).unwrap().into();
+
     rt.spawn(
         interval
             .skip(1)
@@ -51,6 +61,7 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
 
     rt.block_on(
         listener
+            .and_then(|s| async { Ok(acceptor.clone().accept(s).await.unwrap()) })
             .map_err(Error::from)
             .try_for_each_concurrent(None, |s| async {
                 let (_, mut writer) = split(s);
