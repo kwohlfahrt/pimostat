@@ -75,40 +75,42 @@ pub fn run(
 
     local.block_on(
         &mut rt,
-        listener.map_err(Error::from).try_for_each(|s| async {
-            if let Err(e) = s.set_nodelay(true) {
-                eprintln!("Warning: could not set nodelay ({})", e)
-            };
+        listener
+            .map_err(Error::from)
+            .try_for_each_concurrent(None, |s| async {
+                if let Err(e) = s.set_nodelay(true) {
+                    eprintln!("Warning: could not set nodelay ({})", e)
+                };
 
-            let (mut reader, writer) = split(s);
-            let mut rx = rx.clone();
+                let (mut reader, writer) = split(s);
+                let mut rx = rx.clone();
 
-            if let Some(msg) = read_message((&mut reader).compat(), Default::default()).await? {
-		msg.get_root::<controller_capnp::hello::Reader>()?
-		    .get_type()?;
-	    } else {
-                return Ok(());
-            }
+                if let Some(msg) = read_message((&mut reader).compat(), Default::default()).await? {
+                    msg.get_root::<controller_capnp::hello::Reader>()?
+                        .get_type()?;
+                } else {
+                    return Ok(());
+                }
 
-            let network = capnp_rpc::twoparty::VatNetwork::new(
-                reader.compat(),
-                writer.compat_write(),
-                capnp_rpc::rpc_twoparty_capnp::Side::Client,
-                Default::default(),
-            );
+                let network = capnp_rpc::twoparty::VatNetwork::new(
+                    reader.compat(),
+                    writer.compat_write(),
+                    capnp_rpc::rpc_twoparty_capnp::Side::Client,
+                    Default::default(),
+                );
 
-            let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-            let actor: actor_capnp::actor::Client =
-                rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+                let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+                let actor: actor_capnp::actor::Client =
+                    rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
-            local.spawn_local(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
+                local.spawn_local(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-            while let Some(on) = rx.next().await {
-                let mut req = actor.toggle_request();
-                req.get().set_state(on);
-                req.send().promise.await?.get()?;
-            }
-            Ok(())
-        }),
+                while let Some(on) = rx.next().await {
+                    let mut req = actor.toggle_request();
+                    req.get().set_state(on);
+                    req.send().promise.await?.get()?;
+                }
+                Ok(())
+            }),
     )
 }

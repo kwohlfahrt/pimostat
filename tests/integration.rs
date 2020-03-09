@@ -32,7 +32,7 @@ fn test_all() {
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
 
     let gpios = repeat_with(|| NamedTempFile::new().unwrap())
-        .take(2)
+        .take(4)
         .collect::<Vec<_>>();
     let gpio_paths = gpios
         .iter()
@@ -59,7 +59,7 @@ fn test_all() {
         .enumerate()
         .for_each(|(i, gpio_path)| {
             spawn(move || {
-                let controller_port = (5010 + i) as u16;
+                let controller_port = (5010 + i / 2) as u16;
                 actor::run(
                     SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), controller_port),
                     &gpio_path,
@@ -79,7 +79,7 @@ fn test_all() {
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
 
-    assert_eq!(gpios.len(), 2);
+    assert_eq!(gpios.len(), 4);
     gpios
         .iter()
         .for_each(|gpio| assert_eq!(read(&gpio.path()).unwrap(), "101001".as_bytes()));
