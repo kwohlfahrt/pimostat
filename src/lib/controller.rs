@@ -50,17 +50,18 @@ pub fn run(
     let local = tokio::task::LocalSet::new();
     let (tx, rx) = channel(false);
 
-    let connector: tokio_tls::TlsConnector = native_tls::TlsConnector::new().unwrap().into();
+    let connector: tokio_tls::TlsConnector = native_tls::TlsConnector::new()?.into();
 
+    // FIXME: Should error if this fails
     local.spawn_local(
         tokio::net::TcpStream::connect(sensor)
+            .map_err(Error::from)
             .and_then(|s| async move {
                 if let Err(e) = s.set_nodelay(true) {
                     eprintln!("Warning: could not set nodelay ({})", e)
                 };
-                Ok(connector.connect("<URL>", s).await.unwrap())
+                Ok(connector.connect("<URL>", s).await?)
             })
-            .map_err(Error::from)
             .and_then(move |s| async move {
                 let (reader, _) = split(s);
                 let mut messages =

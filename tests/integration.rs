@@ -39,7 +39,7 @@ fn test_all() {
         .map(|gpio| gpio.path().to_owned())
         .collect::<Vec<_>>();
 
-    spawn(move || sensor::run(5000.into(), &w1_therm_path, 1));
+    spawn(move || sensor::run(5000.into(), &w1_therm_path, 1, None));
 
     (0..2).for_each(|i| {
         let port = 5010 + i;

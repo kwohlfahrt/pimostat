@@ -13,9 +13,9 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-use futures::future::ok;
+use futures::future::{ok, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
-use tokio::io::split;
+use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
 use tokio::sync::watch::channel;
 use tokio_util::compat::Tokio02AsyncWriteCompatExt;
@@ -24,6 +24,25 @@ use crate::error::Error;
 use crate::sensor_capnp;
 use crate::socket::listen_on;
 use parse::parse;
+
+async fn handle_connection<S, R>(s: S, mut rx: R) -> Result<(), Error>
+where
+    S: AsyncRead + AsyncWrite,
+    R: StreamExt<Item = f32> + std::marker::Unpin,
+{
+    let (_, mut writer) = split(s);
+
+    while let Some(value) = rx.next().await {
+        let mut msg_builder = capnp::message::Builder::new_default();
+        {
+            let mut msg = msg_builder.init_root::<sensor_capnp::state::Builder>();
+            msg.set_value(value);
+        }
+
+        capnp_futures::serialize::write_message((&mut writer).compat_write(), msg_builder).await?;
+    }
+    Ok(())
+}
 
 pub fn run(
     port: Option<u16>,
@@ -43,10 +62,9 @@ pub fn run(
     let (tx, rx) = channel(parse(&mut source)?);
 
     let interval = rt.enter(|| tokio::time::interval(Duration::from_secs(interval as u64)));
-    let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
-
-    let identity = native_tls::Identity::from_pkcs12(&read(cert.unwrap())?, "").unwrap();
-    let acceptor: tokio_tls::TlsAcceptor = native_tls::TlsAcceptor::new(identity).unwrap().into();
+    let listener = rt
+        .enter(|| tokio::net::TcpListener::from_std(listener))?
+        .map_err(Error::from);
 
     rt.spawn(
         interval
@@ -59,28 +77,15 @@ pub fn run(
             .try_for_each(ok),
     );
 
-    rt.block_on(
-        listener
-            .and_then(|s| async { Ok(acceptor.clone().accept(s).await.unwrap()) })
-            .map_err(Error::from)
-            .try_for_each_concurrent(None, |s| async {
-                let (_, mut writer) = split(s);
-                let mut rx = rx.clone();
-
-                while let Some(value) = rx.next().await {
-                    let mut msg_builder = capnp::message::Builder::new_default();
-                    {
-                        let mut msg = msg_builder.init_root::<sensor_capnp::state::Builder>();
-                        msg.set_value(value);
-                    }
-
-                    capnp_futures::serialize::write_message(
-                        (&mut writer).compat_write(),
-                        msg_builder,
-                    )
-                    .await?;
-                }
-                Ok(())
-            }),
-    )
+    if let Some(cert) = cert {
+        let identity = native_tls::Identity::from_pkcs12(&read(cert)?, "")?;
+        let acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?);
+        rt.block_on(
+            listener
+                .and_then(|s| acceptor.accept(s).map_err(Error::from))
+                .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone())),
+        )
+    } else {
+        rt.block_on(listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone())))
+    }
 }
