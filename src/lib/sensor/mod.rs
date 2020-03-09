@@ -13,7 +13,7 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-use futures::future::{ok, TryFutureExt};
+use futures::future::{join, ok, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
@@ -61,31 +61,30 @@ pub fn run(
     let mut source = BufReader::new(File::open(source)?);
     let (tx, rx) = channel(parse(&mut source)?);
 
-    let interval = rt.enter(|| tokio::time::interval(Duration::from_secs(interval as u64)));
+    let interval = rt
+        .enter(|| tokio::time::interval(Duration::from_secs(interval as u64)))
+        .skip(1)
+        .map(move |_| {
+            source.seek(SeekFrom::Start(0))?;
+            let value = parse(&mut source).map_err(Error::from)?;
+            tx.broadcast(value).map_err(Error::from)
+        })
+        .try_for_each(ok);
+
     let listener = rt
         .enter(|| tokio::net::TcpListener::from_std(listener))?
         .map_err(Error::from);
-
-    rt.spawn(
-        interval
-            .skip(1)
-            .map(move |_| {
-                source.seek(SeekFrom::Start(0))?;
-                let value = parse(&mut source).map_err(Error::from)?;
-                tx.broadcast(value).map_err(Error::from)
-            })
-            .try_for_each(ok),
-    );
-
     if let Some(cert) = cert {
         let identity = native_tls::Identity::from_pkcs12(&read(cert)?, "")?;
         let acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?);
-        rt.block_on(
-            listener
-                .and_then(|s| acceptor.accept(s).map_err(Error::from))
-                .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone())),
-        )
+        let listener = listener
+            .and_then(|s| acceptor.accept(s).map_err(Error::from))
+            .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
+        let (interval, listener) = rt.block_on(join(interval, listener));
+        interval.or(listener)
     } else {
-        rt.block_on(listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone())))
+        let listener = listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
+        let (interval, listener) = rt.block_on(join(interval, listener));
+        interval.or(listener)
     }
 }
