@@ -1,4 +1,4 @@
-{ stdenv, makeRustPlatform, rustChannels, capnproto }:
+{ stdenv, makeRustPlatform, rustChannels, capnproto, openssl, pkgconfig }:
 
 let
   rustPlatform = with rustChannels.stable; makeRustPlatform {
@@ -10,9 +10,9 @@ in rustPlatform.buildRustPackage rec {
   version = "0.1.0";
 
   src = ./.;
-  nativeBuildInputs = [ capnproto ];
+  nativeBuildInputs = [ capnproto openssl pkgconfig ];
 
-  cargoSha256 = "14mask7jv2vhdhbc1zf4444mrdd08ibqsmcjwwkiybz6czss45zy";
+  cargoSha256 = "0wd6jpbw8gki3pgd3h55bn9h51cpn4pg3k28z7iz1fja9s5pbr5b";
 
   meta = with stdenv.lib; {
     platforms = platforms.all;
