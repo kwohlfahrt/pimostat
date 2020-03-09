@@ -1,9 +1,12 @@
 extern crate tempfile;
 
 use std::fs::{read, write};
+use std::iter::repeat_with;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::thread::{sleep, spawn};
 use std::time::Duration;
+
+use tempfile::NamedTempFile;
 
 use pimostat::{actor, controller, sensor};
 
@@ -24,30 +27,45 @@ const HOT: &str = concat!(
 
 #[test]
 fn test_all() {
-    let w1_therm = tempfile::NamedTempFile::new().unwrap();
+    let w1_therm = NamedTempFile::new().unwrap();
     let w1_therm_path = w1_therm.path().to_owned();
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
 
-    let gpio = tempfile::NamedTempFile::new().unwrap();
-    let gpio_path = gpio.path().to_owned();
+    let gpios = repeat_with(|| NamedTempFile::new().unwrap())
+        .take(2)
+        .collect::<Vec<_>>();
+    let gpio_paths = gpios
+        .iter()
+        .map(|gpio| gpio.path().to_owned())
+        .collect::<Vec<_>>();
 
     spawn(move || sensor::run(5000.into(), &w1_therm_path, 1));
-    spawn(move || {
-        controller::run(
-            5001.into(),
-            SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5000),
-            20.0,
-            2.0,
-        )
+
+    (0..2).for_each(|i| {
+	let port = 5010 + i;
+        spawn(move || {
+            controller::run(
+                port.into(),
+                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5000),
+                20.0,
+                2.0,
+            )
+        });
     });
 
     sleep(Duration::from_millis(250));
-    spawn(move || {
-        actor::run(
-            SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5001),
-            &gpio_path,
-        )
-    });
+    gpio_paths
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, gpio_path)| {
+            spawn(move || {
+                let controller_port = (5010 + i) as u16;
+                actor::run(
+                    SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), controller_port),
+                    &gpio_path,
+                )
+            });
+        });
 
     sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
@@ -60,5 +78,9 @@ fn test_all() {
     sleep(Duration::from_secs(1));
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
-    assert_eq!(read(&gpio.path()).unwrap(), "101001".as_bytes());
+
+    assert_eq!(gpios.len(), 2);
+    gpios
+        .iter()
+        .for_each(|gpio| assert_eq!(read(&gpio.path()).unwrap(), "101001".as_bytes()));
 }
