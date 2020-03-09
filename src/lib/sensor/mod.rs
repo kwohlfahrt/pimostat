@@ -49,29 +49,27 @@ pub fn run(port: Option<u16>, source: &Path, interval: u32) -> Result<(), Error>
             .try_for_each(ok),
     );
 
-    rt.block_on(listener.map_err(Error::from).try_for_each(|s| {
-        let (_, mut writer) = split(s);
-        let mut rx = rx.clone();
+    rt.block_on(
+        listener
+            .map_err(Error::from)
+            .try_for_each_concurrent(None, |s| async {
+                let (_, mut writer) = split(s);
+                let mut rx = rx.clone();
 
-        tokio::spawn(async move {
-            while let Some(value) = rx.next().await {
-                let mut msg_builder = capnp::message::Builder::new_default();
-                {
-                    let mut msg = msg_builder.init_root::<sensor_capnp::state::Builder>();
-                    msg.set_value(value);
-                }
+                while let Some(value) = rx.next().await {
+                    let mut msg_builder = capnp::message::Builder::new_default();
+                    {
+                        let mut msg = msg_builder.init_root::<sensor_capnp::state::Builder>();
+                        msg.set_value(value);
+                    }
 
-                if let Err(e) = capnp_futures::serialize::write_message(
-                    (&mut writer).compat_write(),
-                    msg_builder,
-                )
-                .await
-                {
-                    eprintln!("Could not send message ({})", e);
-                    break;
+                    capnp_futures::serialize::write_message(
+                        (&mut writer).compat_write(),
+                        msg_builder,
+                    )
+                    .await?;
                 }
-            }
-        });
-        ok(())
-    }))
+                Ok(())
+            }),
+    )
 }

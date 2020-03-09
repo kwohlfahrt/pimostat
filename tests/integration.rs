@@ -42,7 +42,7 @@ fn test_all() {
     spawn(move || sensor::run(5000.into(), &w1_therm_path, 1));
 
     (0..2).for_each(|i| {
-	let port = 5010 + i;
+        let port = 5010 + i;
         spawn(move || {
             controller::run(
                 port.into(),
