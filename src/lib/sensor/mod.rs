@@ -13,7 +13,8 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-use futures::future::{join, ok, TryFutureExt};
+use futures::future::{ok, select, TryFutureExt};
+use futures::pin_mut;
 use futures::stream::{StreamExt, TryStreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
@@ -74,17 +75,18 @@ pub fn run(
     let listener = rt
         .enter(|| tokio::net::TcpListener::from_std(listener))?
         .map_err(Error::from);
+
     if let Some(cert) = cert {
         let identity = native_tls::Identity::from_pkcs12(&read(cert)?, "")?;
         let acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?);
         let listener = listener
             .and_then(|s| acceptor.accept(s).map_err(Error::from))
             .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
-        let (interval, listener) = rt.block_on(join(interval, listener));
-        interval.or(listener)
+        pin_mut!(listener);
+        rt.block_on(select(interval, listener)).factor_first().0
     } else {
         let listener = listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
-        let (interval, listener) = rt.block_on(join(interval, listener));
-        interval.or(listener)
+        pin_mut!(listener);
+        rt.block_on(select(interval, listener)).factor_first().0
     }
 }
