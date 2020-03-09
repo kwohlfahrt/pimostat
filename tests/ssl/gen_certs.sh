@@ -33,3 +33,10 @@ for CLIENT in sensor controller; do
 done
 openssl verify -CAfile root/cert.pem -untrusted intermediate/cert.pem \
 	{sensor,controller}.cert.pem
+
+# Generate PKCS#12, see github.com/sfackler/rust-native-tls#27
+for CLIENT in sensor controller; do
+    openssl pkcs12 -export -nodes -password pass: \
+	    -in $CLIENT.cert.pem -certfile intermediate/cert.pem \
+	    -inkey $CLIENT.key.pem > $CLIENT.p12
+done
