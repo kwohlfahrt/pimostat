@@ -1,0 +1,10 @@
+[ req ]
+encrypt_key = no
+prompt = no
+distinguished_name = client_req
+
+[ client_req ]
+countryName = GB
+stateOrProvinceName = London
+organizationName = Kai Wohlfahrt
+commonName = $ENV::CLIENT.example.com

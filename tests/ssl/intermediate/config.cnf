@@ -1,0 +1,38 @@
+[ req ]
+encrypt_key = no
+prompt = no
+distinguished_name = ca_req
+
+[ ca_req ]
+countryName = GB
+stateOrProvinceName = London
+organizationName = Kai Wohlfahrt
+commonName = Pimostat Test Intermediate CA
+
+[ ca ]
+default_ca = intermediate_ca
+
+[ intermediate_ca ]
+default_days = 365
+dir = ./intermediate
+new_certs_dir = $dir
+database = $dir/index
+serial = $dir/serial
+crlnumber = $dir/crlnumber
+
+default_md = sha256
+unique_subject = no
+policy = cert_policy
+x509_extensions = cert_ext
+
+[ cert_policy ]
+countryName = match
+stateOrProvinceName = match
+organizationName = match
+commonName = supplied
+
+[ cert_ext ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+basicConstraints = CA:FALSE
+keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment, keyAgreement
