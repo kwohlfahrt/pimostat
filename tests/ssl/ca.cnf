@@ -7,10 +7,7 @@ distinguished_name = ca_req
 countryName = GB
 stateOrProvinceName = London
 organizationName = Kai Wohlfahrt
-commonName = Pimostat Test Root CA
-
-[ ca ]
-default_ca = root_ca
+commonName = Pimostat Test $ENV::CA CA
 
 [ root_ca ]
 default_days = 365
@@ -22,10 +19,10 @@ crlnumber = $dir/crlnumber
 
 default_md = sha256
 unique_subject = no
-policy = ca_policy
+policy = intermediate_policy
 x509_extensions = intermediate_ext
 
-[ ca_policy ]
+[ intermediate_policy ]
 countryName = match
 stateOrProvinceName = match
 organizationName = match
@@ -42,3 +39,28 @@ subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid:always,issuer
 basicConstraints = critical, CA:true, pathlen:0
 keyUsage = critical, digitalSignature, keyCertSign
+
+[ intermediate_ca ]
+default_days = 365
+dir = ./intermediate
+new_certs_dir = $dir
+database = $dir/index
+serial = $dir/serial
+crlnumber = $dir/crlnumber
+
+default_md = sha256
+unique_subject = no
+policy = cert_policy
+x509_extensions = cert_ext
+
+[ cert_policy ]
+countryName = match
+stateOrProvinceName = match
+organizationName = match
+commonName = supplied
+
+[ cert_ext ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+basicConstraints = CA:FALSE
+keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment, keyAgreement
