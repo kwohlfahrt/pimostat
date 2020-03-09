@@ -49,6 +49,7 @@ fn test_all() {
                 SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5000),
                 20.0,
                 2.0,
+                None,
             )
         });
     });

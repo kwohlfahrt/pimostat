@@ -9,11 +9,11 @@ extern crate tokio_util;
 use std::net::SocketAddr;
 
 use capnp_futures::serialize::read_message;
-use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use futures::future::join;
-use tokio::io::split;
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
+use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
-use tokio::sync::watch::channel;
+use tokio::sync::watch;
 use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
 
 use crate::error::Error;
@@ -37,11 +37,33 @@ fn update(on: &mut bool, temperature: f32, target: f32, hysteresis: f32) {
     }
 }
 
+async fn handle_connection<S>(
+    s: S,
+    tx: watch::Sender<bool>,
+    target: f32,
+    hysteresis: f32,
+) -> Result<(), Error>
+where
+    S: AsyncRead + AsyncWrite + 'static,
+{
+    let (reader, _) = split(s);
+    let mut messages = capnp_futures::ReadStream::new(reader.compat(), Default::default());
+
+    let mut on = false;
+    while let Some(msg) = messages.next().await {
+        let temperature = msg?.get_root::<sensor_capnp::state::Reader>()?.get_value();
+        update(&mut on, temperature, target, hysteresis);
+        tx.broadcast(on).map_err(Error::from)?;
+    }
+    Ok(())
+}
+
 pub fn run(
     port: Option<u16>,
     sensor: SocketAddr,
     target: f32,
     hysteresis: f32,
+    tls_url: Option<&str>,
 ) -> Result<(), Error> {
     let mut rt = runtime::Builder::new()
         .basic_scheduler()
@@ -49,31 +71,7 @@ pub fn run(
         .build()
         .expect("Could not construct runtime");
     let local = tokio::task::LocalSet::new();
-    let (tx, rx) = channel(false);
-
-    let connector: tokio_tls::TlsConnector = native_tls::TlsConnector::new()?.into();
-
-    // FIXME: Should error if this fails
-    let sensor = tokio::net::TcpStream::connect(sensor)
-        .map_err(Error::from)
-        .and_then(|s| async move {
-            if let Err(e) = s.set_nodelay(true) {
-                eprintln!("Warning: could not set nodelay ({})", e)
-            };
-            Ok(connector.connect("<URL>", s).await?)
-        })
-        .and_then(move |s| async move {
-            let (reader, _) = split(s);
-            let mut messages = capnp_futures::ReadStream::new(reader.compat(), Default::default());
-
-            let mut on = false;
-            while let Some(msg) = messages.next().await {
-                let temperature = msg?.get_root::<sensor_capnp::state::Reader>()?.get_value();
-                update(&mut on, temperature, target, hysteresis);
-                tx.broadcast(on).map_err(Error::from)?;
-            }
-            Ok(())
-        });
+    let (tx, rx) = watch::channel(false);
 
     let listener = listen_on(port)?;
     let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
@@ -116,6 +114,28 @@ pub fn run(
             Ok(())
         });
 
-    let (sensor, server) = local.block_on(&mut rt, join(sensor, server));
-    sensor.or(server)
+    // FIXME: Should error if this fails
+    let sensor = tokio::net::TcpStream::connect(sensor)
+        .map_err(Error::from)
+        .map_ok(|s| {
+            if let Err(e) = s.set_nodelay(true) {
+                eprintln!("Warning: could not set nodelay ({})", e)
+            };
+            s
+        });
+
+    if let Some(tls_url) = tls_url {
+        let sensor = sensor
+            .and_then(|s| async move {
+                let connector = tokio_tls::TlsConnector::from(native_tls::TlsConnector::new()?);
+                Ok(connector.connect(tls_url, s).await?)
+            })
+            .and_then(move |s| handle_connection(s, tx, target, hysteresis));
+        let (sensor, server) = local.block_on(&mut rt, join(sensor, server));
+        sensor.or(server)
+    } else {
+        let sensor = sensor.and_then(move |s| handle_connection(s, tx, target, hysteresis));
+        let (sensor, server) = local.block_on(&mut rt, join(sensor, server));
+        sensor.or(server)
+    }
 }

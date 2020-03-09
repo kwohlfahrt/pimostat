@@ -15,6 +15,7 @@ fn main() -> Result<(), Error> {
                 .long("port")
                 .takes_value(true),
         )
+        .arg(Arg::with_name("no-tls").long("no-tls"))
         .arg(Arg::with_name("sensor").required(true))
         .arg(Arg::with_name("temperature").required(true))
         .arg(Arg::with_name("hysteresis"))
@@ -40,5 +41,13 @@ fn main() -> Result<(), Error> {
         .next()
         .expect("Invalid sensor address");
 
-    run(port, sensor, target, hysteresis)
+    let tls_url = if matches.is_present("no-tls") {
+        None
+    } else {
+        let sensor = matches.value_of("sensor").unwrap();
+        let (url, _) = sensor.split_at(sensor.rfind(":").unwrap());
+        Some(url)
+    };
+
+    run(port, sensor, target, hysteresis, tls_url)
 }
