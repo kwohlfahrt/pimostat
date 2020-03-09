@@ -9,7 +9,8 @@ extern crate tokio_util;
 use std::net::SocketAddr;
 
 use capnp_futures::serialize::read_message;
-use futures::future::join;
+use futures::future::select;
+use futures::pin_mut;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
@@ -113,15 +114,15 @@ pub fn run(
             }
             Ok(())
         });
+    pin_mut!(server);
 
     // FIXME: Should error if this fails
     let sensor = tokio::net::TcpStream::connect(sensor)
         .map_err(Error::from)
-        .map_ok(|s| {
+        .inspect_ok(|s| {
             if let Err(e) = s.set_nodelay(true) {
                 eprintln!("Warning: could not set nodelay ({})", e)
             };
-            s
         });
 
     if let Some(tls_url) = tls_url {
@@ -131,11 +132,17 @@ pub fn run(
                 Ok(connector.connect(tls_url, s).await?)
             })
             .and_then(move |s| handle_connection(s, tx, target, hysteresis));
-        let (sensor, server) = local.block_on(&mut rt, join(sensor, server));
-        sensor.or(server)
+        pin_mut!(sensor);
+        local
+            .block_on(&mut rt, select(sensor, server))
+            .factor_first()
+            .0
     } else {
         let sensor = sensor.and_then(move |s| handle_connection(s, tx, target, hysteresis));
-        let (sensor, server) = local.block_on(&mut rt, join(sensor, server));
-        sensor.or(server)
+        pin_mut!(sensor);
+        local
+            .block_on(&mut rt, select(sensor, server))
+            .factor_first()
+            .0
     }
 }
