@@ -22,21 +22,17 @@ openssl ca -batch -config ca.cnf -name root_ca \
         -cert root/cert.pem -keyfile root/key.pem \
         -in intermediate/csr.pem -out intermediate/cert.pem
 
-export CLIENT
-for CLIENT in sensor controller; do
-    openssl genrsa 4096 | openssl pkcs8 -topk8 -nocrypt -out ${CLIENT}.key.pem
-    openssl req -new -config client.cnf -key ${CLIENT}.key.pem \
-	    -out ${CLIENT}.csr.pem
-    openssl ca -batch -config ca.cnf -name intermediate_ca \
-	    -cert intermediate/cert.pem -keyfile intermediate/key.pem \
-	    -in ${CLIENT}.csr.pem -out ${CLIENT}.cert.pem
-done
+export CLIENT=localhost
+openssl genrsa 4096 | openssl pkcs8 -topk8 -nocrypt -out ${CLIENT}.key.pem
+openssl req -new -config client.cnf -key ${CLIENT}.key.pem \
+	-out ${CLIENT}.csr.pem
+openssl ca -batch -config ca.cnf -name intermediate_ca \
+	-cert intermediate/cert.pem -keyfile intermediate/key.pem \
+	-in ${CLIENT}.csr.pem -out ${CLIENT}.cert.pem
 openssl verify -CAfile root/cert.pem -untrusted intermediate/cert.pem \
-	{sensor,controller}.cert.pem
+	localhost.cert.pem
 
 # Generate PKCS#12, see github.com/sfackler/rust-native-tls#27
-for CLIENT in sensor controller; do
-    openssl pkcs12 -export -nodes -password pass: \
-	    -in $CLIENT.cert.pem -certfile intermediate/cert.pem \
-	    -inkey $CLIENT.key.pem > $CLIENT.p12
-done
+openssl pkcs12 -export -nodes -password pass: \
+	-in $CLIENT.cert.pem -certfile intermediate/cert.pem \
+	-inkey $CLIENT.key.pem > $CLIENT.p12

@@ -1,9 +1,10 @@
 extern crate tempfile;
 
-use std::path::Path;
+use std::env;
 use std::fs::{read, write};
 use std::iter::repeat_with;
 use std::net::{Ipv6Addr, SocketAddr};
+use std::path::Path;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
 
@@ -93,16 +94,40 @@ fn test_ssl() {
     let w1_therm_path = w1_therm.path().to_owned();
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
 
-    let sensor = spawn(move || sensor::run(6000.into(), &w1_therm_path, 1, Some(Path::new("./tests/ssl/sensor.p12"))));
-    let controller = spawn(move || {
-	controller::run(
-	    6001.into(),
-	    SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 6000),
-	    20.0,
-	    2.0,
-	    Some("sensor.example.com"),
-	)
+    let gpio = NamedTempFile::new().unwrap();
+    let gpio_path = gpio.path().to_owned();
+
+    env::set_var("SSL_CERT_FILE", "./tests/ssl/root/cert.pem");
+
+    spawn(move || {
+        sensor::run(
+            6000.into(),
+            &w1_therm_path,
+            1,
+            Some(Path::new("./tests/ssl/localhost.p12")),
+        )
     });
-    sensor.join().unwrap().unwrap();
-    controller.join().unwrap().unwrap();
+
+    spawn(move || {
+        controller::run(
+            6001.into(),
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 6000),
+            20.0,
+            2.0,
+            Some("localhost"),
+        )
+    });
+
+    sleep(Duration::from_millis(250));
+    spawn(move || {
+        actor::run(
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 6001),
+            &gpio_path,
+        )
+    });
+
+    sleep(Duration::from_millis(250));
+    write(w1_therm.path(), HOT.as_bytes()).unwrap();
+    sleep(Duration::from_secs(1));
+    assert_eq!(read(&gpio.path()).unwrap(), "10".as_bytes());
 }

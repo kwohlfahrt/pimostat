@@ -6,6 +6,8 @@ extern crate tokio;
 extern crate tokio_tls;
 extern crate tokio_util;
 
+use std::env;
+use std::fs::read;
 use std::net::SocketAddr;
 
 use capnp_futures::serialize::read_message;
@@ -126,9 +128,16 @@ pub fn run(
         });
 
     if let Some(tls_url) = tls_url {
+        let mut builder = native_tls::TlsConnector::builder();
+	// For testing. rust-native-tls does not respect this env var on its own
+        if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
+	    builder.add_root_certificate(
+		native_tls::Certificate::from_pem(&read(cert)?).unwrap(),
+	    );
+	};
         let sensor = sensor
             .and_then(|s| async move {
-                let connector = tokio_tls::TlsConnector::from(native_tls::TlsConnector::new()?);
+                let connector = tokio_tls::TlsConnector::from(builder.build()?);
                 Ok(connector.connect(tls_url, s).await?)
             })
             .and_then(move |s| handle_connection(s, tx, target, hysteresis));
