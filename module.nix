@@ -22,7 +22,7 @@ in {
     };
 
     certificate = mkOption {
-      type = types.nullOr types.file;
+      type = types.nullOr types.path;
       default = null;
       description = ''
         The SSL certificate to use for incoming connections.
@@ -62,7 +62,7 @@ in {
     };
 
     certificate = mkOption {
-      type = types.nullOr types.file;
+      type = types.nullOr types.path;
       default = null;
       description = ''
         The SSL certificate to use for incoming connections.
@@ -82,7 +82,7 @@ in {
       description = ''
         Do not require TLS on connection to the sensor.
       '';
-    }
+    };
 
     temperature = mkOption {
       type = typeTemp;
@@ -123,7 +123,7 @@ in {
       description = ''
         Do not require TLS on connection to the controller.
       '';
-    }
+    };
 
     gpio = mkOption {
       type = types.path;
@@ -150,7 +150,7 @@ in {
     systemd.sockets.pimostat-sensor = with cfg.sensor; mkIf enable {
       description = "Pimostat sensor socket";
       socketConfig = {
-        ListenStream = "${toString port}";
+        ListenStream = "${address}";
       };
       wantedBy = [ "sockets.target" ];
     };
@@ -161,7 +161,7 @@ in {
         Type = "simple";
         ExecStart = let
           options = lib.concatStringsSep " " [
-            (if disabletls then "--no-tls" else "")
+            (if disableTls then "--no-tls" else "")
             (if hysteresis != null then "--hysteresis ${hysteresis}" else "")
             (if certificate != null then "--cert ${certificate}" else "")
           ];
@@ -172,7 +172,7 @@ in {
     systemd.sockets.pimostat-controller = with cfg.controller; mkIf enable {
       description = "Pimostat controller socket";
       socketConfig = {
-        ListenStream = "${toString port}";
+        ListenStream = "${address}";
       };
       wantedBy = [ "sockets.target" ];
     };
@@ -188,9 +188,5 @@ in {
         in "${pkgs.pimostat}/bin/actor ${tls} ${controller} ${gpio}";
       };
     };
-
-    networking.firewall.allowedTCPPorts =
-      (optional cfg.sensor.enable cfg.sensor.port) ++
-      (optional cfg.controller.enable cfg.controller.port);
   };
 }
