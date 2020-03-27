@@ -8,13 +8,12 @@ extern crate tokio_util;
 
 use std::env;
 use std::fs::read;
-use std::net::SocketAddr;
 use std::path::Path;
 
 use capnp_futures::serialize::read_message;
 use futures::future::select;
 use futures::pin_mut;
-use futures::{StreamExt, TryFutureExt, TryStreamExt};
+use futures::{StreamExt, TryFuture, TryFutureExt, TryStream, TryStreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
 use tokio::sync::watch;
@@ -24,15 +23,6 @@ use crate::error::Error;
 use crate::socket::listen_on;
 use crate::{actor_capnp, controller_capnp, sensor_capnp};
 
-#[derive(Copy, Clone)]
-struct Config {
-    pub target: f32,
-    pub hysteresis: f32,
-    pub port: Option<u16>,
-    pub sensor: SocketAddr,
-}
-
-#[allow(unused)]
 fn update(on: &mut bool, temperature: f32, target: f32, hysteresis: f32) {
     if temperature > target {
         *on = false;
@@ -41,53 +31,23 @@ fn update(on: &mut bool, temperature: f32, target: f32, hysteresis: f32) {
     }
 }
 
-async fn handle_connection<S>(
-    s: S,
-    tx: watch::Sender<bool>,
+fn run_controller<S, L>(
+    sensor: impl TryFuture<Ok = S, Error = Error>,
+    listener: impl TryStream<Ok = L, Error = Error>,
+    mut rt: tokio::runtime::Runtime,
     target: f32,
     hysteresis: f32,
 ) -> Result<(), Error>
 where
-    S: AsyncRead + AsyncWrite + 'static,
+    S: AsyncRead + Unpin + 'static,
+    L: AsyncRead + AsyncWrite + 'static,
 {
-    let (reader, _) = split(s);
-    let mut messages = capnp_futures::ReadStream::new(reader.compat(), Default::default());
-
-    let mut on = false;
-    while let Some(msg) = messages.next().await {
-        let temperature = msg?.get_root::<sensor_capnp::state::Reader>()?.get_value();
-        update(&mut on, temperature, target, hysteresis);
-        tx.broadcast(on).map_err(Error::from)?;
-    }
-    Ok(())
-}
-
-pub fn run(
-    address: Option<(&str, u16)>,
-    cert: Option<&Path>,
-    sensor: (&str, u16),
-    tls: bool,
-    target: f32,
-    hysteresis: f32,
-) -> Result<(), Error> {
-    let mut rt = runtime::Builder::new()
-        .basic_scheduler()
-        .enable_all()
-        .build()
-        .expect("Could not construct runtime");
     let local = tokio::task::LocalSet::new();
     let (tx, rx) = watch::channel(false);
-
-    let listener = listen_on(address)?;
-    let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
 
     let server = listener
         .map_err(Error::from)
         .try_for_each_concurrent(None, |s| async {
-            if let Err(e) = s.set_nodelay(true) {
-                eprintln!("Warning: could not set nodelay ({})", e)
-            };
-
             let (mut reader, writer) = split(s);
             let mut rx = rx.clone();
 
@@ -120,7 +80,66 @@ pub fn run(
         });
     pin_mut!(server);
 
-    let tls_host = sensor.0;
+    let sensor = sensor.and_then(|s| async {
+        let mut messages = capnp_futures::ReadStream::new(s.compat(), Default::default());
+
+        let mut on = false;
+        while let Some(msg) = messages.next().await {
+            let temperature = msg?.get_root::<sensor_capnp::state::Reader>()?.get_value();
+            update(&mut on, temperature, target, hysteresis);
+            tx.broadcast(on).map_err(Error::from)?;
+        }
+        Ok(())
+    });
+    pin_mut!(sensor);
+
+    local
+        .block_on(&mut rt, select(sensor, server))
+        .factor_first()
+        .0
+}
+
+pub fn run(
+    address: Option<(&str, u16)>,
+    cert: Option<&Path>,
+    sensor: (&str, u16),
+    tls: bool,
+    target: f32,
+    hysteresis: f32,
+) -> Result<(), Error> {
+    let (tls_host, _) = sensor;
+    let tls_connector = {
+        let mut builder = native_tls::TlsConnector::builder();
+        // For testing. rust-native-tls does not respect this env var on its own
+        if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
+            builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
+        };
+        tokio_tls::TlsConnector::from(builder.build()?)
+    };
+    let tls_acceptor = cert
+        .map(|cert| -> Result<_, Error> {
+            let identity = native_tls::Identity::from_pkcs12(&read(cert)?, "")?;
+            Ok(tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(
+                identity,
+            )?))
+        })
+        .transpose()?;
+
+    let rt = runtime::Builder::new()
+        .basic_scheduler()
+        .enable_all()
+        .build()
+        .expect("Could not construct runtime");
+
+    let listener = listen_on(address)?;
+    let listener = rt
+        .enter(|| tokio::net::TcpListener::from_std(listener))?
+        .map_err(Error::from)
+        .inspect_ok(|s| {
+            if let Err(e) = s.set_nodelay(true) {
+                eprintln!("Warning: could not set nodelay ({})", e)
+            };
+        });
     let sensor = tokio::net::TcpStream::connect(sensor)
         .map_err(Error::from)
         .inspect_ok(|s| {
@@ -128,30 +147,25 @@ pub fn run(
                 eprintln!("Warning: could not set nodelay ({})", e)
             };
         });
+    pin_mut!(sensor);
 
-    if tls {
-        let mut builder = native_tls::TlsConnector::builder();
-        // For testing. rust-native-tls does not respect this env var on its own
-        if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
-            builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
-        };
-        let sensor = sensor
-            .and_then(|s| async move {
-                let connector = tokio_tls::TlsConnector::from(builder.build()?);
-                Ok(connector.connect(tls_host, s).await?)
-            })
-            .and_then(move |s| handle_connection(s, tx, target, hysteresis));
-        pin_mut!(sensor);
-        local
-            .block_on(&mut rt, select(sensor, server))
-            .factor_first()
-            .0
+    if let Some(tls_acceptor) = tls_acceptor {
+        let listener = listener.and_then(|s| tls_acceptor.accept(s).map_err(Error::from));
+
+        if tls {
+            let sensor =
+                sensor.and_then(|s| async move { Ok(tls_connector.connect(tls_host, s).await?) });
+            run_controller(sensor, listener, rt, target, hysteresis)
+        } else {
+            run_controller(sensor, listener, rt, target, hysteresis)
+        }
     } else {
-        let sensor = sensor.and_then(move |s| handle_connection(s, tx, target, hysteresis));
-        pin_mut!(sensor);
-        local
-            .block_on(&mut rt, select(sensor, server))
-            .factor_first()
-            .0
+        if tls {
+            let sensor =
+                sensor.and_then(|s| async move { Ok(tls_connector.connect(tls_host, s).await?) });
+            run_controller(sensor, listener, rt, target, hysteresis)
+        } else {
+            run_controller(sensor, listener, rt, target, hysteresis)
+        }
     }
 }

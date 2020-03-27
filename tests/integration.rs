@@ -78,6 +78,8 @@ fn test_all() {
 
 #[test]
 fn test_ssl() {
+    let cert = Path::new("./tests/ssl/localhost.p12");
+
     let w1_therm = NamedTempFile::new().unwrap();
     let w1_therm_path = w1_therm.path().to_owned();
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
@@ -87,19 +89,12 @@ fn test_ssl() {
 
     env::set_var("SSL_CERT_FILE", "./tests/ssl/root/cert.pem");
 
-    spawn(move || {
-        sensor::run(
-            Some(("::1", 6000)),
-            Some(Path::new("./tests/ssl/localhost.p12")),
-            &w1_therm_path,
-            1,
-        )
-    });
+    spawn(move || sensor::run(Some(("::1", 6000)), Some(cert), &w1_therm_path, 1));
 
     spawn(move || {
         controller::run(
             Some(("::1", 6001)),
-            None,
+            Some(cert),
             ("localhost", 6000),
             true,
             20.0,
@@ -108,14 +103,7 @@ fn test_ssl() {
     });
 
     sleep(Duration::from_millis(250));
-    spawn(move || {
-        actor::run(
-            ("::1", 6001),
-            // TODO: Test TLS for actor
-            false,
-            &gpio_path,
-        )
-    });
+    spawn(move || actor::run(("localhost", 6001), true, &gpio_path));
 
     sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
