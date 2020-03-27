@@ -89,11 +89,11 @@ fn test_ssl() {
 
     env::set_var("SSL_CERT_FILE", "./tests/ssl/root/cert.pem");
 
-    spawn(move || sensor::run(Some(("::1", 6000)), Some(cert), &w1_therm_path, 1));
+    spawn(move || sensor::run(Some(("localhost", 6000)), Some(cert), &w1_therm_path, 1));
 
     spawn(move || {
         controller::run(
-            Some(("::1", 6001)),
+            Some(("localhost", 6001)),
             Some(cert),
             ("localhost", 6000),
             true,
