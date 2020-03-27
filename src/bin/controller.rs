@@ -1,24 +1,21 @@
 extern crate clap;
 
-use std::net::ToSocketAddrs;
+use std::path::Path;
 
 use clap::{App, Arg};
 
 use pimostat::controller::run;
 use pimostat::error::Error;
+use pimostat::util::split_host_port;
 
 fn main() -> Result<(), Error> {
     let matches = App::new("Temperature Controller")
-        .arg(
-            Arg::with_name("port")
-                .short("p")
-                .long("port")
-                .takes_value(true),
-        )
         .arg(Arg::with_name("no-tls").long("no-tls"))
+        .arg(Arg::with_name("hysteresis").long("hysteresis"))
+        .arg(Arg::with_name("certificate").long("cert").takes_value(true))
         .arg(Arg::with_name("sensor").required(true))
         .arg(Arg::with_name("temperature").required(true))
-        .arg(Arg::with_name("hysteresis"))
+        .arg(Arg::with_name("address"))
         .get_matches();
 
     let target: f32 = matches
@@ -31,23 +28,16 @@ fn main() -> Result<(), Error> {
         .unwrap_or("1.5")
         .parse()
         .expect("Invalid hysteresis");
-    let port: Option<u16> = matches
-        .value_of("port")
-        .map(|p| p.parse().expect("Invalid port"));
-    let sensor = matches
-        .value_of("sensor")
-        .unwrap()
-        .to_socket_addrs()?
-        .next()
-        .expect("Invalid sensor address");
+    let address = matches.value_of("address").map(split_host_port);
+    let sensor = matches.value_of("sensor").map(split_host_port).unwrap();
+    let cert = matches.value_of("certificate").map(Path::new);
 
-    let tls_url = if matches.is_present("no-tls") {
-        None
-    } else {
-        let sensor = matches.value_of("sensor").unwrap();
-        let (url, _) = sensor.split_at(sensor.rfind(":").unwrap());
-        Some(url)
-    };
-
-    run(port, sensor, target, hysteresis, tls_url)
+    run(
+        address,
+        cert,
+        sensor,
+        !matches.is_present("no-tls"),
+        target,
+        hysteresis,
+    )
 }

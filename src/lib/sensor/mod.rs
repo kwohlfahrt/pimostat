@@ -46,12 +46,12 @@ where
 }
 
 pub fn run(
-    port: Option<u16>,
+    address: Option<(&str, u16)>,
+    cert: Option<&Path>,
     source: &Path,
     interval: u32,
-    cert: Option<&Path>,
 ) -> Result<(), Error> {
-    let listener = listen_on(port)?;
+    let listener = listen_on(address)?;
 
     let mut rt = runtime::Builder::new()
         .basic_scheduler()

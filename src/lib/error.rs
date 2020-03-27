@@ -69,4 +69,10 @@ impl From<super::sensor::parse::Error> for Error {
     }
 }
 
+impl From<std::num::ParseIntError> for Error {
+    fn from(_: std::num::ParseIntError) -> Self {
+        Error::Parse
+    }
+}
+
 impl std::error::Error for Error {}

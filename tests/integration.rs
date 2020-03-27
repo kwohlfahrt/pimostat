@@ -3,7 +3,6 @@ extern crate tempfile;
 use std::env;
 use std::fs::{read, write};
 use std::iter::repeat_with;
-use std::net::{Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
@@ -41,19 +40,11 @@ fn test_all() {
         .map(|gpio| gpio.path().to_owned())
         .collect::<Vec<_>>();
 
-    spawn(move || sensor::run(5000.into(), &w1_therm_path, 1, None));
+    spawn(move || sensor::run(Some(("::1", 5000)), None, &w1_therm_path, 1));
 
     (0..2).for_each(|i| {
         let port = 5010 + i;
-        spawn(move || {
-            controller::run(
-                port.into(),
-                SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 5000),
-                20.0,
-                2.0,
-                None,
-            )
-        });
+        spawn(move || controller::run(Some(("::1", port)), None, ("::1", 5000), false, 20.0, 2.0));
     });
 
     sleep(Duration::from_millis(250));
@@ -63,10 +54,7 @@ fn test_all() {
         .for_each(|(i, gpio_path)| {
             spawn(move || {
                 let controller_port = (5010 + i / 2) as u16;
-                actor::run(
-                    SocketAddr::new(Ipv6Addr::LOCALHOST.into(), controller_port),
-                    &gpio_path,
-                )
+                actor::run(("::1", controller_port), false, &gpio_path)
             });
         });
 
@@ -101,27 +89,30 @@ fn test_ssl() {
 
     spawn(move || {
         sensor::run(
-            6000.into(),
+            Some(("::1", 6000)),
+            Some(Path::new("./tests/ssl/localhost.p12")),
             &w1_therm_path,
             1,
-            Some(Path::new("./tests/ssl/localhost.p12")),
         )
     });
 
     spawn(move || {
         controller::run(
-            6001.into(),
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 6000),
+            Some(("::1", 6001)),
+            None,
+            ("localhost", 6000),
+            true,
             20.0,
             2.0,
-            Some("localhost"),
         )
     });
 
     sleep(Duration::from_millis(250));
     spawn(move || {
         actor::run(
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 6001),
+            ("::1", 6001),
+            // TODO: Test TLS for actor
+            false,
             &gpio_path,
         )
     });

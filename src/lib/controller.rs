@@ -9,6 +9,7 @@ extern crate tokio_util;
 use std::env;
 use std::fs::read;
 use std::net::SocketAddr;
+use std::path::Path;
 
 use capnp_futures::serialize::read_message;
 use futures::future::select;
@@ -62,11 +63,12 @@ where
 }
 
 pub fn run(
-    port: Option<u16>,
-    sensor: SocketAddr,
+    address: Option<(&str, u16)>,
+    cert: Option<&Path>,
+    sensor: (&str, u16),
+    tls: bool,
     target: f32,
     hysteresis: f32,
-    tls_url: Option<&str>,
 ) -> Result<(), Error> {
     let mut rt = runtime::Builder::new()
         .basic_scheduler()
@@ -76,7 +78,7 @@ pub fn run(
     let local = tokio::task::LocalSet::new();
     let (tx, rx) = watch::channel(false);
 
-    let listener = listen_on(port)?;
+    let listener = listen_on(address)?;
     let listener = rt.enter(|| tokio::net::TcpListener::from_std(listener))?;
 
     let server = listener
@@ -118,7 +120,7 @@ pub fn run(
         });
     pin_mut!(server);
 
-    // FIXME: Should error if this fails
+    let tls_host = sensor.0;
     let sensor = tokio::net::TcpStream::connect(sensor)
         .map_err(Error::from)
         .inspect_ok(|s| {
@@ -127,18 +129,16 @@ pub fn run(
             };
         });
 
-    if let Some(tls_url) = tls_url {
+    if tls {
         let mut builder = native_tls::TlsConnector::builder();
-	// For testing. rust-native-tls does not respect this env var on its own
+        // For testing. rust-native-tls does not respect this env var on its own
         if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
-	    builder.add_root_certificate(
-		native_tls::Certificate::from_pem(&read(cert)?).unwrap(),
-	    );
-	};
+            builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
+        };
         let sensor = sensor
             .and_then(|s| async move {
                 let connector = tokio_tls::TlsConnector::from(builder.build()?);
-                Ok(connector.connect(tls_url, s).await?)
+                Ok(connector.connect(tls_host, s).await?)
             })
             .and_then(move |s| handle_connection(s, tx, target, hysteresis));
         pin_mut!(sensor);
