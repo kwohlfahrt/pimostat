@@ -11,7 +11,12 @@ use pimostat::util::split_host_port;
 fn main() -> Result<(), Error> {
     let matches = App::new("Temperature Controller")
         .arg(Arg::with_name("no-tls").long("no-tls"))
-        .arg(Arg::with_name("hysteresis").long("hysteresis"))
+        .arg(
+            Arg::with_name("hysteresis")
+                .long("hysteresis")
+                .short("h")
+                .takes_value(true),
+        )
         .arg(Arg::with_name("certificate").long("cert").takes_value(true))
         .arg(Arg::with_name("sensor").required(true))
         .arg(Arg::with_name("temperature").required(true))

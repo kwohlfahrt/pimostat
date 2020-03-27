@@ -14,10 +14,18 @@ in {
       '';
     };
 
-    port = mkOption {
-      type = types.port;
+    address = mkOption {
+      type = types.str;
       description = ''
-        The port to listen for incoming connections on.
+        The address to listen for incoming connections on.
+      '';
+    };
+
+    certificate = mkOption {
+      type = types.nullOr types.file;
+      default = null;
+      description = ''
+        The SSL certificate to use for incoming connections.
       '';
     };
 
@@ -29,8 +37,8 @@ in {
     };
 
     interval = mkOption {
-      type = types.ints.positive;
-      default = 60;
+      type = types.nullOr types.ints.positive;
+      default = null;
       description = ''
         The interval (in seconds) at which to read the temperature.
       '';
@@ -46,19 +54,35 @@ in {
       '';
     };
 
-    port = mkOption {
-      type = types.port;
+    address = mkOption {
+      type = types.str;
       description = ''
-        The port to listen for incoming connections on.
+        The address to listen for incoming connections on.
+      '';
+    };
+
+    certificate = mkOption {
+      type = types.nullOr types.file;
+      default = null;
+      description = ''
+        The SSL certificate to use for incoming connections.
       '';
     };
 
     sensor = mkOption {
       type = types.str;
       description = ''
-        The URL of the sensor to read from.
+        The address of the sensor to connect to.
       '';
     };
+
+    disableTls = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Do not require TLS on connection to the sensor.
+      '';
+    }
 
     temperature = mkOption {
       type = typeTemp;
@@ -69,8 +93,8 @@ in {
     };
 
     hysteresis = mkOption {
-      type = typeTemp;
-      default = "1.0";
+      type = types.nullOr typeTemp;
+      default = null;
       description = ''
         The hysteresis range about the threshold.
       '';
@@ -89,9 +113,17 @@ in {
     controller = mkOption {
       type = types.str;
       description = ''
-        The URL of the controller to listen to.
+        The address of the controller to listen to.
       '';
     };
+
+    disableTls = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Do not require TLS on connection to the controller.
+      '';
+    }
 
     gpio = mkOption {
       type = types.path;
@@ -106,7 +138,12 @@ in {
       description = "w1-therm sensor service";
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${pkgs.pimostat}/bin/sensor ${escapeShellArg file} ${toString interval}";
+        ExecStart = let
+          options = lib.concatStringsSep " " [
+            (if interval != null then "--interval ${interval}" else "")
+            (if certificate != null then "--cert ${certificate}" else "")
+          ];
+        in "${pkgs.pimostat}/bin/sensor ${escapeShellArg file} ${toString interval}";
       };
     };
 
@@ -122,7 +159,13 @@ in {
       description = "Pimostat controller service";
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${pkgs.pimostat}/bin/controller ${sensor} ${temperature} ${hysteresis}";
+        ExecStart = let
+          options = lib.concatStringsSep " " [
+            (if disabletls then "--no-tls" else "")
+            (if hysteresis != null then "--hysteresis ${hysteresis}" else "")
+            (if certificate != null then "--cert ${certificate}" else "")
+          ];
+        in "${pkgs.pimostat}/bin/controller ${options} ${sensor} ${temperature}";
       };
     };
 
@@ -140,7 +183,9 @@ in {
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${pkgs.pimostat}/bin/actor ${controller} ${gpio}";
+        ExecStart = let
+          tls = if disableTls then "--no-tls" else "";
+        in "${pkgs.pimostat}/bin/actor ${tls} ${controller} ${gpio}";
       };
     };
 
