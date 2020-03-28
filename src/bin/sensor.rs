@@ -30,5 +30,5 @@ fn main() -> Result<(), Error> {
         .expect("Invalid interval");
     let source = matches.value_of("source").unwrap();
 
-    run(address, cert, source.as_ref(), interval)
+    run(address, cert, source.as_ref(), interval, None)
 }

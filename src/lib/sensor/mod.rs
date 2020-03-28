@@ -13,12 +13,12 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-use futures::future::{ok, select, TryFutureExt};
-use futures::pin_mut;
+use futures::future::{pending, ready, select, FutureExt, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
+use futures::{channel::oneshot, pin_mut};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
-use tokio::sync::watch::channel;
+use tokio::sync::watch;
 use tokio_util::compat::Tokio02AsyncWriteCompatExt;
 
 use crate::error::Error;
@@ -50,8 +50,17 @@ pub fn run(
     cert: Option<&Path>,
     source: &Path,
     interval: u32,
+    termination: Option<oneshot::Receiver<()>>,
 ) -> Result<(), Error> {
-    let listener = listen_on(address)?;
+    let tls_acceptor = cert
+        .map(|cert| -> Result<_, Error> {
+            let identity = native_tls::Identity::from_pkcs12(&read(cert)?, "")?;
+            Ok(tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(
+                identity,
+            )?))
+        })
+        .transpose()?;
+    let termination = termination.map(|rx| rx.or_else(|_| pending()));
 
     let mut rt = runtime::Builder::new()
         .basic_scheduler()
@@ -60,33 +69,41 @@ pub fn run(
         .expect("Could not construct runtime");
 
     let mut source = BufReader::new(File::open(source)?);
-    let (tx, rx) = channel(parse(&mut source)?);
+    let (tx, rx) = watch::channel(parse(&mut source)?);
 
     let interval = rt
         .enter(|| tokio::time::interval(Duration::from_secs(interval as u64)))
         .skip(1)
         .map(move |_| {
             source.seek(SeekFrom::Start(0))?;
-            let value = parse(&mut source).map_err(Error::from)?;
-            tx.broadcast(value).map_err(Error::from)
+            Ok(parse(&mut source)?)
         })
-        .try_for_each(ok);
+        .try_for_each(|value| ready(tx.broadcast(value)).err_into());
 
+    let listener = listen_on(address)?;
     let listener = rt
         .enter(|| tokio::net::TcpListener::from_std(listener))?
-        .map_err(Error::from);
+        .err_into();
 
-    if let Some(cert) = cert {
-        let identity = native_tls::Identity::from_pkcs12(&read(cert)?, "")?;
-        let acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?);
+    if let Some(tls_acceptor) = tls_acceptor {
         let listener = listener
-            .and_then(|s| acceptor.accept(s).map_err(Error::from))
+            .and_then(|s| tls_acceptor.accept(s).err_into())
             .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
         pin_mut!(listener);
-        rt.block_on(select(interval, listener)).factor_first().0
+        if let Some(termination) = termination {
+            let interval = select(interval, termination).map(|e| e.factor_first().0);
+            rt.block_on(select(interval, listener)).factor_first().0
+        } else {
+            rt.block_on(select(interval, listener)).factor_first().0
+        }
     } else {
         let listener = listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
         pin_mut!(listener);
-        rt.block_on(select(interval, listener)).factor_first().0
+        if let Some(termination) = termination {
+            let interval = select(interval, termination).map(|e| e.factor_first().0);
+            rt.block_on(select(interval, listener)).factor_first().0
+        } else {
+            rt.block_on(select(interval, listener)).factor_first().0
+        }
     }
 }

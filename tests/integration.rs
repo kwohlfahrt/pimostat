@@ -7,6 +7,7 @@ use std::path::Path;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
 
+use futures::channel::oneshot;
 use tempfile::NamedTempFile;
 
 use pimostat::{actor, controller, sensor};
@@ -40,23 +41,30 @@ fn test_all() {
         .map(|gpio| gpio.path().to_owned())
         .collect::<Vec<_>>();
 
-    spawn(move || sensor::run(Some(("::1", 5000)), None, &w1_therm_path, 1));
+    let (tx, rx) = oneshot::channel();
 
-    (0..2).for_each(|i| {
-        let port = 5010 + i;
-        spawn(move || controller::run(Some(("::1", port)), None, ("::1", 5000), false, 20.0, 2.0));
-    });
+    let sensor = spawn(move || sensor::run(Some(("::1", 5000)), None, &w1_therm_path, 1, Some(rx)));
+
+    let controllers = (0..2)
+        .map(|i| {
+            let port = 5010 + i;
+            spawn(move || {
+                controller::run(Some(("::1", port)), None, ("::1", 5000), false, 20.0, 2.0)
+            })
+        })
+        .collect::<Vec<_>>();
 
     sleep(Duration::from_millis(250));
-    gpio_paths
+    let actors = gpio_paths
         .into_iter()
         .enumerate()
-        .for_each(|(i, gpio_path)| {
+        .map(|(i, gpio_path)| {
             spawn(move || {
                 let controller_port = (5010 + i / 2) as u16;
                 actor::run(("::1", controller_port), false, &gpio_path)
-            });
-        });
+            })
+        })
+        .collect::<Vec<_>>();
 
     sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
@@ -69,6 +77,15 @@ fn test_all() {
     sleep(Duration::from_secs(1));
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
+
+    tx.send(()).unwrap();
+    sensor.join().unwrap().unwrap();
+    controllers
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap().unwrap());
+    actors
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap().unwrap());
 
     assert_eq!(gpios.len(), 4);
     gpios
@@ -89,9 +106,19 @@ fn test_ssl() {
 
     env::set_var("SSL_CERT_FILE", "./tests/ssl/root/cert.pem");
 
-    spawn(move || sensor::run(Some(("localhost", 6000)), Some(cert), &w1_therm_path, 1));
+    let (tx, rx) = oneshot::channel();
 
-    spawn(move || {
+    let sensor = spawn(move || {
+        sensor::run(
+            Some(("localhost", 6000)),
+            Some(cert),
+            &w1_therm_path,
+            1,
+            Some(rx),
+        )
+    });
+
+    let controller = spawn(move || {
         controller::run(
             Some(("localhost", 6001)),
             Some(cert),
@@ -103,10 +130,15 @@ fn test_ssl() {
     });
 
     sleep(Duration::from_millis(250));
-    spawn(move || actor::run(("localhost", 6001), true, &gpio_path));
+    let actor = spawn(move || actor::run(("localhost", 6001), true, &gpio_path));
 
     sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
+
+    tx.send(()).unwrap();
+    sensor.join().unwrap().unwrap();
+    controller.join().unwrap().unwrap();
+    actor.join().unwrap().unwrap();
     assert_eq!(read(&gpio.path()).unwrap(), "10".as_bytes());
 }
