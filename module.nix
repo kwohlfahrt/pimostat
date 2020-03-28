@@ -143,7 +143,7 @@ in {
             (if interval != null then "--interval ${interval}" else "")
             (if certificate != null then "--cert ${certificate}" else "")
           ];
-        in "${pkgs.pimostat}/bin/sensor ${escapeShellArg file} ${toString interval}";
+        in "${pkgs.pimostat}/bin/sensor ${options} ${escapeShellArg file} ${toString interval}";
       };
     };
 
