@@ -11,6 +11,7 @@ capnp-rpc = "0.12"
 capnp-futures = "0.12"
 clap = "2.33"
 futures = "0.3"
+native-tls = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
@@ -25,6 +26,10 @@ features = [ "compat" ]
 git = "https://github.com/tokio-rs/tokio.git"
 rev = "1eb6131"
 features = [ "time", "net", "fs", "rt-core", "rt-util", "io-util", "stream", "sync" ]
+
+[dependencies.tokio-tls]
+git = "https://github.com/tokio-rs/tokio.git"
+rev = "1eb6131"
 
 [build-dependencies]
 capnpc = "0.12"

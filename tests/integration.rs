@@ -1,11 +1,13 @@
 extern crate tempfile;
 
+use std::env;
 use std::fs::{read, write};
 use std::iter::repeat_with;
-use std::net::{Ipv6Addr, SocketAddr};
+use std::path::Path;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
 
+use futures::channel::oneshot;
 use tempfile::NamedTempFile;
 
 use pimostat::{actor, controller, sensor};
@@ -39,33 +41,30 @@ fn test_all() {
         .map(|gpio| gpio.path().to_owned())
         .collect::<Vec<_>>();
 
-    spawn(move || sensor::run(5000.into(), &w1_therm_path, 1));
+    let (tx, rx) = oneshot::channel();
 
-    (0..2).for_each(|i| {
-        let port = 5010 + i;
-        spawn(move || {
-            controller::run(
-                port.into(),
-                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5000),
-                20.0,
-                2.0,
-            )
-        });
-    });
+    let sensor = spawn(move || sensor::run(Some(("::1", 5000)), None, &w1_therm_path, 1, Some(rx)));
+
+    let controllers = (0..2)
+        .map(|i| {
+            let port = 5010 + i;
+            spawn(move || {
+                controller::run(Some(("::1", port)), None, ("::1", 5000), false, 20.0, 2.0)
+            })
+        })
+        .collect::<Vec<_>>();
 
     sleep(Duration::from_millis(250));
-    gpio_paths
+    let actors = gpio_paths
         .into_iter()
         .enumerate()
-        .for_each(|(i, gpio_path)| {
+        .map(|(i, gpio_path)| {
             spawn(move || {
                 let controller_port = (5010 + i / 2) as u16;
-                actor::run(
-                    SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), controller_port),
-                    &gpio_path,
-                )
-            });
-        });
+                actor::run(("::1", controller_port), false, &gpio_path)
+            })
+        })
+        .collect::<Vec<_>>();
 
     sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
@@ -79,8 +78,67 @@ fn test_all() {
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
 
+    tx.send(()).unwrap();
+    sensor.join().unwrap().unwrap();
+    controllers
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap().unwrap());
+    actors
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap().unwrap());
+
     assert_eq!(gpios.len(), 4);
     gpios
         .iter()
-        .for_each(|gpio| assert_eq!(read(&gpio.path()).unwrap(), "101001".as_bytes()));
+        .for_each(|gpio| assert_eq!(read(&gpio).unwrap(), "101001".as_bytes()));
+}
+
+#[test]
+fn test_ssl() {
+    let cert = Path::new("./tests/ssl/localhost.p12");
+
+    let w1_therm = NamedTempFile::new().unwrap();
+    let w1_therm_path = w1_therm.path().to_owned();
+    write(w1_therm.path(), COLD.as_bytes()).unwrap();
+
+    let gpio = NamedTempFile::new().unwrap();
+    let gpio_path = gpio.path().to_owned();
+
+    env::set_var("SSL_CERT_FILE", "./tests/ssl/root/cert.pem");
+
+    let (tx, rx) = oneshot::channel();
+
+    let sensor = spawn(move || {
+        sensor::run(
+            Some(("localhost", 6000)),
+            Some(cert),
+            &w1_therm_path,
+            1,
+            Some(rx),
+        )
+    });
+
+    let controller = spawn(move || {
+        controller::run(
+            Some(("localhost", 6001)),
+            Some(cert),
+            ("localhost", 6000),
+            true,
+            20.0,
+            2.0,
+        )
+    });
+
+    sleep(Duration::from_millis(250));
+    let actor = spawn(move || actor::run(("localhost", 6001), true, &gpio_path));
+
+    sleep(Duration::from_millis(250));
+    write(w1_therm.path(), HOT.as_bytes()).unwrap();
+    sleep(Duration::from_secs(1));
+
+    tx.send(()).unwrap();
+    sensor.join().unwrap().unwrap();
+    controller.join().unwrap().unwrap();
+    actor.join().unwrap().unwrap();
+    assert_eq!(read(&gpio).unwrap(), "10".as_bytes());
 }

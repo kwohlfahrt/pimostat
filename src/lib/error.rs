@@ -1,4 +1,5 @@
 extern crate capnp;
+extern crate native_tls;
 extern crate tokio;
 
 #[derive(Debug)]
@@ -10,6 +11,7 @@ pub enum Error {
     Send,
     Checksum,
     Parse,
+    Tls(native_tls::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -22,6 +24,7 @@ impl std::fmt::Display for Error {
             Error::Timer(e) => write!(fmt, "Timer({})", e),
             Error::Checksum => write!(fmt, "Checksum"),
             Error::Parse => write!(fmt, "Parse"),
+            Error::Tls(e) => write!(fmt, "TLS({})", e),
         }
     }
 }
@@ -44,6 +47,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<native_tls::Error> for Error {
+    fn from(e: native_tls::Error) -> Self {
+        Error::Tls(e)
+    }
+}
+
 impl<T> From<tokio::sync::watch::error::SendError<T>> for Error {
     fn from(_: tokio::sync::watch::error::SendError<T>) -> Self {
         Error::Send
@@ -57,6 +66,12 @@ impl From<super::sensor::parse::Error> for Error {
             super::sensor::parse::Error::Parse => Error::Parse,
             super::sensor::parse::Error::IO(e) => Error::IO(e),
         }
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    fn from(_: std::num::ParseIntError) -> Self {
+        Error::Parse
     }
 }
 

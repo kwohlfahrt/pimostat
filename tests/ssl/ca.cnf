@@ -1,0 +1,66 @@
+[ req ]
+encrypt_key = no
+prompt = no
+distinguished_name = ca_req
+
+[ ca_req ]
+countryName = GB
+stateOrProvinceName = London
+organizationName = Kai Wohlfahrt
+commonName = Pimostat Test $ENV::CA CA
+
+[ root_ca ]
+default_days = 365
+dir = ./root
+new_certs_dir = $dir
+database = $dir/index
+serial = $dir/serial
+crlnumber = $dir/crlnumber
+
+default_md = sha256
+unique_subject = no
+policy = intermediate_policy
+x509_extensions = intermediate_ext
+
+[ intermediate_policy ]
+countryName = match
+stateOrProvinceName = match
+organizationName = match
+commonName = supplied
+
+[ root_ext ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = critical, digitalSignature, keyCertSign
+
+[ intermediate_ext ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true, pathlen:0
+keyUsage = critical, digitalSignature, keyCertSign
+
+[ intermediate_ca ]
+default_days = 365
+dir = ./intermediate
+new_certs_dir = $dir
+database = $dir/index
+serial = $dir/serial
+crlnumber = $dir/crlnumber
+
+default_md = sha256
+unique_subject = no
+policy = cert_policy
+x509_extensions = cert_ext
+
+[ cert_policy ]
+countryName = match
+stateOrProvinceName = match
+organizationName = match
+commonName = supplied
+
+[ cert_ext ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+basicConstraints = CA:FALSE
+keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment, keyAgreement

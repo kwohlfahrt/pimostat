@@ -3,16 +3,17 @@ extern crate capnp_futures;
 extern crate capnp_rpc;
 extern crate futures;
 extern crate tokio;
+extern crate tokio_tls;
 extern crate tokio_util;
 
-use std::fs::{File, OpenOptions};
+use std::env;
+use std::fs::{read, File, OpenOptions};
 use std::io::Write;
-use std::net::SocketAddr;
 use std::path::Path;
 
 use capnp_rpc::pry;
 use futures::TryFutureExt;
-use tokio::io::split;
+use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
 use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
 
@@ -45,7 +46,47 @@ impl actor_capnp::actor::Server for Actor {
     }
 }
 
-pub fn run(addr: SocketAddr, gpio: &Path) -> Result<(), Error> {
+async fn run_rpc<S>(s: S, client: actor_capnp::actor::Client) -> Result<(), Error>
+where
+    S: AsyncRead + AsyncWrite + 'static,
+{
+    let mut builder = capnp::message::Builder::new_default();
+    {
+        let mut msg = builder.init_root::<controller_capnp::hello::Builder>();
+        msg.set_type(controller_capnp::hello::Type::Actor);
+    }
+
+    let (reader, mut writer) = split(s);
+
+    capnp_futures::serialize::write_message((&mut writer).compat_write(), builder)
+        .map_err(Error::CapnP)
+        .await?;
+
+    let network = capnp_rpc::twoparty::VatNetwork::new(
+        reader.compat(),
+        writer.compat_write(),
+        capnp_rpc::rpc_twoparty_capnp::Side::Server,
+        Default::default(),
+    );
+
+    capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client))
+        .map_err(Error::CapnP)
+        .await
+}
+
+pub fn run(controller: (&str, u16), tls: bool, gpio: &Path) -> Result<(), Error> {
+    let (tls_host, _) = controller;
+    let tls_connector = if tls {
+        let mut builder = native_tls::TlsConnector::builder();
+        // For testing. rust-native-tls does not respect this env var on its own
+        if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
+            builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
+        };
+        Some(tokio_tls::TlsConnector::from(builder.build()?))
+    } else {
+        None
+    };
+
     let gpio = OpenOptions::new()
         .read(false)
         .write(true)
@@ -61,32 +102,20 @@ pub fn run(addr: SocketAddr, gpio: &Path) -> Result<(), Error> {
     let client =
         actor_capnp::actor::ToClient::new(Actor { gpio }).into_client::<capnp_rpc::Server>();
 
-    let mut builder = capnp::message::Builder::new_default();
-    {
-        let mut msg = builder.init_root::<controller_capnp::hello::Builder>();
-        msg.set_type(controller_capnp::hello::Type::Actor);
+    let controller = tokio::net::TcpStream::connect(&controller)
+        .map_err(Error::from)
+        .inspect_ok(|s| {
+            if let Err(e) = s.set_nodelay(true) {
+                eprintln!("Warning: could not set nodelay ({})", e)
+            };
+        });
+
+    if let Some(tls_connector) = tls_connector {
+        let controller =
+            controller.and_then(|s| async move { Ok(tls_connector.connect(tls_host, s).await?) });
+
+        rt.block_on(controller.and_then(|s| run_rpc(s, client)))
+    } else {
+        rt.block_on(controller.and_then(|s| run_rpc(s, client)))
     }
-
-    rt.block_on(async {
-        let s = tokio::net::TcpStream::connect(&addr).await?;
-        if let Err(e) = s.set_nodelay(true) {
-            eprintln!("Warning: could not set nodelay ({})", e)
-        };
-        let (reader, mut writer) = split(s);
-
-        capnp_futures::serialize::write_message((&mut writer).compat_write(), builder)
-            .map_err(Error::CapnP)
-            .await?;
-
-        let network = capnp_rpc::twoparty::VatNetwork::new(
-            reader.compat(),
-            writer.compat_write(),
-            capnp_rpc::rpc_twoparty_capnp::Side::Server,
-            Default::default(),
-        );
-
-        capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client))
-            .map_err(Error::CapnP)
-            .await
-    })
 }

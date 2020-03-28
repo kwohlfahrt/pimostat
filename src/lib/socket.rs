@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener};
+use std::net::TcpListener;
 use std::os::unix::io::FromRawFd;
 
 pub fn get_systemd_socket() -> std::net::TcpListener {
@@ -17,15 +17,9 @@ pub fn get_systemd_socket() -> std::net::TcpListener {
     unsafe { std::net::TcpListener::from_raw_fd(3) }
 }
 
-pub fn listen_on(port: Option<u16>) -> Result<TcpListener, std::io::Error> {
-    match port {
+pub fn listen_on(address: Option<(&str, u16)>) -> Result<TcpListener, std::io::Error> {
+    match address {
         None => Ok(get_systemd_socket()),
-        Some(p) => {
-            let addrs = [
-                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), p),
-                SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), p),
-            ];
-            TcpListener::bind(&addrs[..])
-        }
+        Some(addr) => TcpListener::bind(addr),
     }
 }

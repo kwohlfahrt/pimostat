@@ -1,0 +1,6 @@
+*.pem
+*.old
+*.attr
+*.p12
+*/index
+*/serial

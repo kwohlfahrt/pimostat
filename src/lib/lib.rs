@@ -10,11 +10,10 @@ pub mod sensor_capnp {
     include!(concat!(env!("OUT_DIR"), "/sensor_capnp.rs"));
 }
 
-pub mod error;
-
 mod socket;
-pub use socket::get_systemd_socket;
 
 pub mod actor;
 pub mod controller;
+pub mod error;
 pub mod sensor;
+pub mod util;
