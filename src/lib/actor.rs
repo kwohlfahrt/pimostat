@@ -75,6 +75,18 @@ where
 }
 
 pub fn run(controller: (&str, u16), tls: bool, gpio: &Path) -> Result<(), Error> {
+    let (tls_host, _) = controller;
+    let tls_connector = if tls {
+        let mut builder = native_tls::TlsConnector::builder();
+        // For testing. rust-native-tls does not respect this env var on its own
+        if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
+            builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
+        };
+        Some(tokio_tls::TlsConnector::from(builder.build()?))
+    } else {
+        None
+    };
+
     let gpio = OpenOptions::new()
         .read(false)
         .write(true)
@@ -90,7 +102,6 @@ pub fn run(controller: (&str, u16), tls: bool, gpio: &Path) -> Result<(), Error>
     let client =
         actor_capnp::actor::ToClient::new(Actor { gpio }).into_client::<capnp_rpc::Server>();
 
-    let controller_host = controller.0;
     let controller = tokio::net::TcpStream::connect(&controller)
         .map_err(Error::from)
         .inspect_ok(|s| {
@@ -99,16 +110,9 @@ pub fn run(controller: (&str, u16), tls: bool, gpio: &Path) -> Result<(), Error>
             };
         });
 
-    if tls {
-        let mut builder = native_tls::TlsConnector::builder();
-        // For testing. rust-native-tls does not respect this env var on its own
-        if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
-            builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
-        };
-        let controller = controller.and_then(|s| async move {
-            let connector = tokio_tls::TlsConnector::from(builder.build()?);
-            Ok(connector.connect(controller_host, s).await?)
-        });
+    if let Some(tls_connector) = tls_connector {
+        let controller =
+            controller.and_then(|s| async move { Ok(tls_connector.connect(tls_host, s).await?) });
 
         rt.block_on(controller.and_then(|s| run_rpc(s, client)))
     } else {

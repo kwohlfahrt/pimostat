@@ -108,13 +108,15 @@ pub fn run(
     hysteresis: f32,
 ) -> Result<(), Error> {
     let (tls_host, _) = sensor;
-    let tls_connector = {
+    let tls_connector = if tls {
         let mut builder = native_tls::TlsConnector::builder();
         // For testing. rust-native-tls does not respect this env var on its own
         if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
             builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
         };
-        tokio_tls::TlsConnector::from(builder.build()?)
+        Some(tokio_tls::TlsConnector::from(builder.build()?))
+    } else {
+        None
     };
     let tls_acceptor = cert
         .map(|cert| -> Result<_, Error> {
@@ -152,7 +154,7 @@ pub fn run(
     if let Some(tls_acceptor) = tls_acceptor {
         let listener = listener.and_then(|s| tls_acceptor.accept(s).map_err(Error::from));
 
-        if tls {
+        if let Some(tls_connector) = tls_connector {
             let sensor =
                 sensor.and_then(|s| async move { Ok(tls_connector.connect(tls_host, s).await?) });
             run_controller(sensor, listener, rt, target, hysteresis)
@@ -160,7 +162,7 @@ pub fn run(
             run_controller(sensor, listener, rt, target, hysteresis)
         }
     } else {
-        if tls {
+        if let Some(tls_connector) = tls_connector {
             let sensor =
                 sensor.and_then(|s| async move { Ok(tls_connector.connect(tls_host, s).await?) });
             run_controller(sensor, listener, rt, target, hysteresis)
