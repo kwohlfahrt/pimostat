@@ -12,24 +12,12 @@ capnp-futures = "0.12"
 clap = "2.33"
 futures = "0.3"
 native-tls = "0.2"
+tokio = { version = "0.2.16", features = [ "time", "net", "fs", "rt-core", "rt-util", "io-util", "stream", "sync" ] }
+tokio-util = { version = "0.3.1", features = [ "compat" ] }
+tokio-tls = "0.3.0"
 
 [dev-dependencies]
 tempfile = "3"
-
-# Require PR#2117
-[dependencies.tokio-util]
-git = "https://github.com/tokio-rs/tokio.git"
-rev = "1eb6131"
-features = [ "compat" ]
-
-[dependencies.tokio]
-git = "https://github.com/tokio-rs/tokio.git"
-rev = "1eb6131"
-features = [ "time", "net", "fs", "rt-core", "rt-util", "io-util", "stream", "sync" ]
-
-[dependencies.tokio-tls]
-git = "https://github.com/tokio-rs/tokio.git"
-rev = "1eb6131"
 
 [build-dependencies]
 capnpc = "0.12"

@@ -12,7 +12,7 @@ in rustPlatform.buildRustPackage rec {
   src = ./.;
   nativeBuildInputs = [ capnproto openssl pkgconfig ];
 
-  cargoSha256 = "0wd6jpbw8gki3pgd3h55bn9h51cpn4pg3k28z7iz1fja9s5pbr5b";
+  cargoSha256 = "1n05yhka2ikm6dx74rcahcny19wrfs37idxg0a3jj7mgrzc2vy0j";
 
   preCheck = ''
     (cd ./tests/ssl/ && ${bash}/bin/bash ./gen_certs.sh)
