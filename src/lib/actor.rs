@@ -103,7 +103,7 @@ pub fn run(controller: (&str, u16), tls: bool, gpio: &Path) -> Result<(), Error>
         actor_capnp::actor::ToClient::new(Actor { gpio }).into_client::<capnp_rpc::Server>();
 
     let controller = tokio::net::TcpStream::connect(&controller)
-        .map_err(Error::from)
+        .err_into()
         .inspect_ok(|s| {
             if let Err(e) = s.set_nodelay(true) {
                 eprintln!("Warning: could not set nodelay ({})", e)

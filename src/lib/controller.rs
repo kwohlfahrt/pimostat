@@ -46,7 +46,7 @@ where
     let (tx, rx) = watch::channel(false);
 
     let server = listener
-        .map_err(Error::from)
+        .err_into()
         .try_for_each_concurrent(None, |s| async {
             let (mut reader, writer) = split(s);
             let mut rx = rx.clone();
@@ -87,7 +87,7 @@ where
         while let Some(msg) = messages.next().await {
             let temperature = msg?.get_root::<sensor_capnp::state::Reader>()?.get_value();
             update(&mut on, temperature, target, hysteresis);
-            tx.broadcast(on).map_err(Error::from)?;
+            tx.broadcast(on)?;
         }
         Ok(())
     });
@@ -136,14 +136,14 @@ pub fn run(
     let listener = listen_on(address)?;
     let listener = rt
         .enter(|| tokio::net::TcpListener::from_std(listener))?
-        .map_err(Error::from)
+        .err_into()
         .inspect_ok(|s| {
             if let Err(e) = s.set_nodelay(true) {
                 eprintln!("Warning: could not set nodelay ({})", e)
             };
         });
     let sensor = tokio::net::TcpStream::connect(sensor)
-        .map_err(Error::from)
+        .err_into()
         .inspect_ok(|s| {
             if let Err(e) = s.set_nodelay(true) {
                 eprintln!("Warning: could not set nodelay ({})", e)
@@ -152,7 +152,7 @@ pub fn run(
     pin_mut!(sensor);
 
     if let Some(tls_acceptor) = tls_acceptor {
-        let listener = listener.and_then(|s| tls_acceptor.accept(s).map_err(Error::from));
+        let listener = listener.and_then(|s| tls_acceptor.accept(s).err_into());
 
         if let Some(tls_connector) = tls_connector {
             let sensor =
