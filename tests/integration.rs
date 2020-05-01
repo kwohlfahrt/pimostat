@@ -1,5 +1,6 @@
 extern crate tempfile;
 
+use std::convert::TryFrom;
 use std::env;
 use std::fs::{read, write};
 use std::iter::repeat_with;
@@ -61,7 +62,11 @@ fn test_all() {
         .map(|(i, gpio_path)| {
             spawn(move || {
                 let controller_port = (5010 + i / 2) as u16;
-                actor::run(("::1", controller_port), false, &gpio_path)
+                actor::run(
+                    ("::1", controller_port),
+                    false,
+                    actor::FileActor::try_from(gpio_path.as_ref()).unwrap(),
+                )
             })
         })
         .collect::<Vec<_>>();
@@ -130,7 +135,13 @@ fn test_ssl() {
     });
 
     sleep(Duration::from_millis(250));
-    let actor = spawn(move || actor::run(("localhost", 6001), true, &gpio_path));
+    let actor = spawn(move || {
+        actor::run(
+            ("localhost", 6001),
+            true,
+            actor::FileActor::try_from(gpio_path.as_ref()).unwrap(),
+        )
+    });
 
     sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();

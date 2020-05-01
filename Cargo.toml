@@ -15,6 +15,7 @@ native-tls = "0.2"
 tokio = { version = "0.2.16", features = [ "time", "net", "fs", "rt-core", "rt-util", "io-util", "stream", "sync" ] }
 tokio-util = { version = "0.3.1", features = [ "compat" ] }
 tokio-tls = "0.3.0"
+gpiochip = "0.1.1"
 
 [dev-dependencies]
 tempfile = "3"

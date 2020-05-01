@@ -7,9 +7,7 @@ extern crate tokio_tls;
 extern crate tokio_util;
 
 use std::env;
-use std::fs::{read, File, OpenOptions};
-use std::io::Write;
-use std::path::Path;
+use std::fs::read;
 
 use capnp_rpc::pry;
 use futures::TryFutureExt;
@@ -17,22 +15,20 @@ use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
 use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
 
+mod file;
+mod gpio;
+
+pub use file::FileActor;
+pub use gpio::GpioActor;
+
 use crate::error::Error;
 use crate::{actor_capnp, controller_capnp};
 
-struct Actor {
-    gpio: File,
+pub trait Actor {
+    fn update(&mut self, state: bool) -> std::io::Result<()>;
 }
 
-impl Actor {
-    fn update(&mut self, state: bool) -> std::io::Result<()> {
-        write!(self.gpio, "{}", if state { "1" } else { "0" })?;
-        self.gpio.flush()?;
-        Ok(())
-    }
-}
-
-impl actor_capnp::actor::Server for Actor {
+impl<A: Actor> actor_capnp::actor::Server for A {
     fn toggle(
         &mut self,
         params: actor_capnp::actor::ToggleParams,
@@ -74,7 +70,10 @@ where
         .await
 }
 
-pub fn run(controller: (&str, u16), tls: bool, gpio: &Path) -> Result<(), Error> {
+pub fn run<A>(controller: (&str, u16), tls: bool, actor: A) -> Result<(), Error>
+where
+    A: Actor + 'static,
+{
     let (tls_host, _) = controller;
     let tls_connector = if tls {
         let mut builder = native_tls::TlsConnector::builder();
@@ -87,20 +86,13 @@ pub fn run(controller: (&str, u16), tls: bool, gpio: &Path) -> Result<(), Error>
         None
     };
 
-    let gpio = OpenOptions::new()
-        .read(false)
-        .write(true)
-        .open(gpio)
-        .expect("Could not open GPIO file");
-
     let mut rt = runtime::Builder::new()
         .basic_scheduler()
         .enable_all()
         .build()
         .expect("Could not construct runtime");
 
-    let client =
-        actor_capnp::actor::ToClient::new(Actor { gpio }).into_client::<capnp_rpc::Server>();
+    let client = actor_capnp::actor::ToClient::new(actor).into_client::<capnp_rpc::Server>();
 
     let controller = tokio::net::TcpStream::connect(&controller)
         .err_into()
