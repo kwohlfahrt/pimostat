@@ -4,6 +4,22 @@ let
   cfg = config.services.pimostat;
   inherit (lib) types mkOption mkIf optional escapeShellArg;
   typeTemp = types.strMatching "[0-9]+(.[0-9]+)?";
+  gpioType = types.submodule {
+    options = {
+      device = mkOption {
+        type = types.path;
+        description = ''
+        The GPIO chip device.
+      '';
+      };
+      line = mkOption {
+        type = types.int;
+        description = ''
+        The line within the GPIO chip.
+      '';
+      };
+    };
+  };
 in {
   options.services.pimostat.sensor = {
     enable = mkOption {
@@ -126,7 +142,7 @@ in {
     };
 
     gpio = mkOption {
-      type = types.path;
+      type = gpioType;
       description = ''
         The GPIO to write to in response to changes.
       '';
@@ -185,7 +201,7 @@ in {
         Type = "simple";
         ExecStart = let
           tls = if disableTls then "--no-tls" else "";
-        in "${pkgs.pimostat}/bin/actor ${tls} ${controller} ${gpio}";
+        in "${pkgs.pimostat}/bin/actor ${tls} ${controller} ${gpio.device} ${toString gpio.line}";
       };
     };
   };

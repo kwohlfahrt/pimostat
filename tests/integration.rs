@@ -1,5 +1,6 @@
 extern crate tempfile;
 
+use std::convert::TryFrom;
 use std::env;
 use std::fs::{read, write};
 use std::iter::repeat_with;
@@ -61,7 +62,11 @@ fn test_all() {
         .map(|(i, gpio_path)| {
             spawn(move || {
                 let controller_port = (5010 + i / 2) as u16;
-                actor::run(("::1", controller_port), false, &gpio_path)
+                actor::run(
+                    ("::1", controller_port),
+                    false,
+                    actor::FileActor::try_from(gpio_path.as_ref()).unwrap(),
+                )
             })
         })
         .collect::<Vec<_>>();
@@ -90,7 +95,7 @@ fn test_all() {
     assert_eq!(gpios.len(), 4);
     gpios
         .iter()
-        .for_each(|gpio| assert_eq!(read(&gpio).unwrap(), "101001".as_bytes()));
+        .for_each(|gpio| assert_eq!(read(&gpio).unwrap(), "010110".as_bytes()));
 }
 
 #[test]
@@ -130,7 +135,13 @@ fn test_ssl() {
     });
 
     sleep(Duration::from_millis(250));
-    let actor = spawn(move || actor::run(("localhost", 6001), true, &gpio_path));
+    let actor = spawn(move || {
+        actor::run(
+            ("localhost", 6001),
+            true,
+            actor::FileActor::try_from(gpio_path.as_ref()).unwrap(),
+        )
+    });
 
     sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
@@ -140,5 +151,5 @@ fn test_ssl() {
     sensor.join().unwrap().unwrap();
     controller.join().unwrap().unwrap();
     actor.join().unwrap().unwrap();
-    assert_eq!(read(&gpio).unwrap(), "10".as_bytes());
+    assert_eq!(read(&gpio).unwrap(), "01".as_bytes());
 }
