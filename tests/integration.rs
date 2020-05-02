@@ -95,7 +95,7 @@ fn test_all() {
     assert_eq!(gpios.len(), 4);
     gpios
         .iter()
-        .for_each(|gpio| assert_eq!(read(&gpio).unwrap(), "101001".as_bytes()));
+        .for_each(|gpio| assert_eq!(read(&gpio).unwrap(), "010110".as_bytes()));
 }
 
 #[test]
@@ -151,5 +151,5 @@ fn test_ssl() {
     sensor.join().unwrap().unwrap();
     controller.join().unwrap().unwrap();
     actor.join().unwrap().unwrap();
-    assert_eq!(read(&gpio).unwrap(), "10".as_bytes());
+    assert_eq!(read(&gpio).unwrap(), "01".as_bytes());
 }

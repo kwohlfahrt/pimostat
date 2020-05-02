@@ -11,7 +11,7 @@ pub struct FileActor {
 
 impl Actor for FileActor {
     fn update(&mut self, state: bool) -> std::io::Result<()> {
-        write!(self.handle, "{}", if state { "1" } else { "0" })?;
+        write!(self.handle, "{}", if state { "0" } else { "1" })?;
         self.handle.flush()?;
         Ok(())
     }

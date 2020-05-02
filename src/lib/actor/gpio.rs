@@ -13,8 +13,7 @@ pub struct GpioActor {
 
 impl Actor for GpioActor {
     fn update(&mut self, state: bool) -> std::io::Result<()> {
-        self.handle.set(if state { 1 } else { 0 })?;
-        Ok(())
+        self.handle.set(if state { 0 } else { 1 })
     }
 }
 
