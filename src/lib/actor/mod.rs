@@ -92,7 +92,7 @@ where
         .build()
         .expect("Could not construct runtime");
 
-    let client = actor_capnp::actor::ToClient::new(actor).into_client::<capnp_rpc::Server>();
+    let client = capnp_rpc::new_client(actor);
 
     let controller = tokio::net::TcpStream::connect(&controller)
         .err_into()
