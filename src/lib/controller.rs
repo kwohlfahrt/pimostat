@@ -1,11 +1,3 @@
-extern crate capnp;
-extern crate capnp_futures;
-extern crate capnp_rpc;
-extern crate futures;
-extern crate tokio;
-extern crate tokio_tls;
-extern crate tokio_util;
-
 use std::env;
 use std::fs::read;
 use std::path::Path;

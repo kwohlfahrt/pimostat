@@ -1,5 +1,3 @@
-extern crate tempfile;
-
 use std::convert::TryFrom;
 use std::env;
 use std::fs::{read, write};

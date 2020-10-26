@@ -1,5 +1,3 @@
-extern crate clap;
-
 use std::path::Path;
 
 use clap::{App, Arg};

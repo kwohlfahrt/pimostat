@@ -1,7 +1,3 @@
-extern crate capnp;
-extern crate native_tls;
-extern crate tokio;
-
 #[derive(Debug)]
 pub enum Error {
     CapnP(capnp::Error),

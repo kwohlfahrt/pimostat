@@ -1,5 +1,3 @@
-extern crate capnpc;
-
 fn main() {
     let schemas = ["sensor.capnp", "actor.capnp", "controller.capnp"];
 
