@@ -40,10 +40,11 @@ where
     let server = listener
         .err_into()
         .try_for_each_concurrent(None, |s| async {
-            let (mut reader, writer) = split(s);
+            let (reader, writer) = split(s);
+            let mut reader = reader.compat();
             let mut rx = rx.clone();
 
-            if let Some(msg) = read_message((&mut reader).compat(), Default::default()).await? {
+            if let Some(msg) = read_message(&mut reader, Default::default()).await? {
                 msg.get_root::<controller_capnp::hello::Reader>()?
                     .get_type()?;
             } else {
@@ -51,7 +52,7 @@ where
             }
 
             let network = capnp_rpc::twoparty::VatNetwork::new(
-                reader.compat(),
+                reader,
                 writer.compat_write(),
                 capnp_rpc::rpc_twoparty_capnp::Side::Client,
                 Default::default(),
@@ -63,9 +64,9 @@ where
 
             local.spawn_local(rpc_system.map_err(|e| eprintln!("RPC error ({})", e)));
 
-            while let Some(on) = rx.next().await {
+            while rx.changed().await.is_ok() {
                 let mut req = actor.toggle_request();
-                req.get().set_state(on);
+                req.get().set_state(*rx.borrow());
                 req.send().promise.await?.get()?;
             }
             Ok(())
@@ -73,13 +74,14 @@ where
     pin_mut!(server);
 
     let sensor = sensor.and_then(|s| async {
-        let mut messages = capnp_futures::ReadStream::new(s.compat(), Default::default());
+        let s = s.compat();
+        let mut messages = capnp_futures::ReadStream::new(s, Default::default());
 
         let mut on = false;
         while let Some(msg) = messages.next().await {
             let temperature = msg?.get_root::<sensor_capnp::state::Reader>()?.get_value();
             update(&mut on, temperature, target, hysteresis);
-            tx.broadcast(on)?;
+            tx.send(on)?;
         }
         Ok(())
     });
@@ -106,34 +108,36 @@ pub fn run(
         if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
             builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
         };
-        Some(tokio_tls::TlsConnector::from(builder.build()?))
+        Some(tokio_native_tls::TlsConnector::from(builder.build()?))
     } else {
         None
     };
     let tls_acceptor = cert
         .map(|cert| -> Result<_, Error> {
             let identity = native_tls::Identity::from_pkcs12(&read(cert)?, "")?;
-            Ok(tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(
-                identity,
-            )?))
+            Ok(tokio_native_tls::TlsAcceptor::from(
+                native_tls::TlsAcceptor::new(identity)?,
+            ))
         })
         .transpose()?;
 
-    let rt = runtime::Builder::new()
-        .basic_scheduler()
-        .enable_all()
+    let rt = runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
         .build()
         .expect("Could not construct runtime");
 
     let listener = listen_on(address)?;
-    let listener = rt
-        .enter(|| tokio::net::TcpListener::from_std(listener))?
-        .err_into()
-        .inspect_ok(|s| {
-            if let Err(e) = s.set_nodelay(true) {
-                eprintln!("Warning: could not set nodelay ({})", e)
-            };
-        });
+    let listener = {
+        let _guard = rt.enter();
+        tokio::net::TcpListener::from_std(listener)?
+            .err_into()
+            .inspect_ok(|s| {
+                if let Err(e) = s.set_nodelay(true) {
+                    eprintln!("Warning: could not set nodelay ({})", e)
+                };
+            })
+    };
     let sensor = tokio::net::TcpStream::connect(sensor)
         .err_into()
         .inspect_ok(|s| {

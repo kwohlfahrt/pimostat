@@ -18,8 +18,10 @@ pub fn get_systemd_socket() -> std::net::TcpListener {
 }
 
 pub fn listen_on(address: Option<(&str, u16)>) -> Result<TcpListener, std::io::Error> {
-    match address {
+    let socket = match address {
         None => Ok(get_systemd_socket()),
         Some(addr) => TcpListener::bind(addr),
-    }
+    }?;
+    socket.set_nonblocking(true)?;
+    Ok(socket)
 }

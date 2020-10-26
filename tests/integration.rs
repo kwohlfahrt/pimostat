@@ -6,7 +6,7 @@ use std::path::Path;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
 
-use futures::channel::oneshot;
+use tokio::sync::oneshot;
 use tempfile::NamedTempFile;
 
 use pimostat::{actor, controller, sensor};
@@ -43,6 +43,7 @@ fn test_all() {
     let (tx, rx) = oneshot::channel();
 
     let sensor = spawn(move || sensor::run(Some(("::1", 5000)), None, &w1_therm_path, 1, Some(rx)));
+    sleep(Duration::from_millis(100));
 
     let controllers = (0..2)
         .map(|i| {
@@ -52,8 +53,8 @@ fn test_all() {
             })
         })
         .collect::<Vec<_>>();
+    sleep(Duration::from_millis(100));
 
-    sleep(Duration::from_millis(250));
     let actors = gpio_paths
         .into_iter()
         .enumerate()
@@ -68,8 +69,8 @@ fn test_all() {
             })
         })
         .collect::<Vec<_>>();
+    sleep(Duration::from_millis(100));
 
-    sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
     write(w1_therm.path(), COLD.as_bytes()).unwrap();
@@ -120,6 +121,7 @@ fn test_ssl() {
             Some(rx),
         )
     });
+    sleep(Duration::from_millis(100));
 
     let controller = spawn(move || {
         controller::run(
@@ -131,8 +133,8 @@ fn test_ssl() {
             2.0,
         )
     });
+    sleep(Duration::from_millis(100));
 
-    sleep(Duration::from_millis(250));
     let actor = spawn(move || {
         actor::run(
             ("localhost", 6001),
@@ -140,8 +142,8 @@ fn test_ssl() {
             actor::FileActor::try_from(gpio_path.as_ref()).unwrap(),
         )
     });
+    sleep(Duration::from_millis(100));
 
-    sleep(Duration::from_millis(250));
     write(w1_therm.path(), HOT.as_bytes()).unwrap();
     sleep(Duration::from_secs(1));
 

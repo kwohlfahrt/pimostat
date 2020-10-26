@@ -2,7 +2,7 @@
 pub enum Error {
     CapnP(capnp::Error),
     Schema(capnp::NotInSchema),
-    Timer(tokio::time::Error),
+    Timer(tokio::time::error::Error),
     IO(std::io::Error),
     Send,
     Checksum,

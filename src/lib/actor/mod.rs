@@ -44,15 +44,16 @@ where
         msg.set_type(controller_capnp::hello::Type::Actor);
     }
 
-    let (reader, mut writer) = split(s);
+    let (reader, writer) = split(s);
+    let mut writer = writer.compat_write();
 
-    capnp_futures::serialize::write_message((&mut writer).compat_write(), builder)
+    capnp_futures::serialize::write_message(&mut writer, builder)
         .map_err(Error::CapnP)
         .await?;
 
     let network = capnp_rpc::twoparty::VatNetwork::new(
         reader.compat(),
-        writer.compat_write(),
+        writer,
         capnp_rpc::rpc_twoparty_capnp::Side::Server,
         Default::default(),
     );
@@ -73,14 +74,14 @@ where
         if let Some(cert) = env::var("SSL_CERT_FILE").ok() {
             builder.add_root_certificate(native_tls::Certificate::from_pem(&read(cert)?).unwrap());
         };
-        Some(tokio_tls::TlsConnector::from(builder.build()?))
+        Some(tokio_native_tls::TlsConnector::from(builder.build()?))
     } else {
         None
     };
 
-    let mut rt = runtime::Builder::new()
-        .basic_scheduler()
-        .enable_all()
+    let rt = runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
         .build()
         .expect("Could not construct runtime");
 
