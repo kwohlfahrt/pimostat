@@ -5,7 +5,7 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-use futures::future::{pending, ready, select, FutureExt, TryFutureExt};
+use futures::future::{pending, ready, select, Either, FutureExt, TryFutureExt};
 use futures::pin_mut;
 use futures::stream::{StreamExt, TryStreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
@@ -52,7 +52,9 @@ pub fn run(
             ))
         })
         .transpose()?;
-    let termination = termination.map(|rx| rx.or_else(|_| pending()));
+    let termination = termination
+        .map(|rx| Either::Right(rx.or_else(|_| pending())))
+        .unwrap_or(Either::Left(pending()));
 
     let rt = runtime::Builder::new_current_thread()
         .enable_io()
@@ -85,20 +87,12 @@ pub fn run(
             .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
         pin_mut!(listener);
         // TODO: Look into take_until for this
-        if let Some(termination) = termination {
-            let interval = select(interval, termination).map(|e| e.factor_first().0);
-            rt.block_on(select(interval, listener)).factor_first().0
-        } else {
-            rt.block_on(select(interval, listener)).factor_first().0
-        }
+        let interval = select(interval, termination).map(|e| e.factor_first().0);
+        rt.block_on(select(interval, listener)).factor_first().0
     } else {
         let listener = listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
         pin_mut!(listener);
-        if let Some(termination) = termination {
-            let interval = select(interval, termination).map(|e| e.factor_first().0);
-            rt.block_on(select(interval, listener)).factor_first().0
-        } else {
-            rt.block_on(select(interval, listener)).factor_first().0
-        }
+        let interval = select(interval, termination).map(|e| e.factor_first().0);
+        rt.block_on(select(interval, listener)).factor_first().0
     }
 }
