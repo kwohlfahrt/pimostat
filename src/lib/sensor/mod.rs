@@ -6,9 +6,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use futures::future::{pending, ready, select, Either, TryFutureExt};
+use futures::io::AsyncWrite;
 use futures::pin_mut;
 use futures::stream::{StreamExt, TryStreamExt};
-use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
 use tokio::sync::{oneshot, watch};
 use tokio_util::compat::Tokio02AsyncWriteCompatExt;
@@ -18,13 +18,10 @@ use crate::sensor_capnp;
 use crate::socket::listen_on;
 use parse::parse;
 
-async fn handle_connection<S>(s: S, mut rx: watch::Receiver<f32>) -> Result<(), Error>
-where
-    S: AsyncRead + AsyncWrite,
-{
-    let (_, writer) = split(s);
-    let mut writer = writer.compat_write();
-
+async fn handle_connection<W: AsyncWrite + Unpin>(
+    mut writer: W,
+    mut rx: watch::Receiver<f32>,
+) -> Result<(), Error> {
     while rx.changed().await.is_ok() {
         let mut msg_builder = capnp::message::Builder::new_default();
         {
@@ -80,18 +77,17 @@ pub fn run(
     let listener = {
         let _guard = rt.enter();
         tokio::net::TcpListener::from_std(listener)?.err_into()
-    };
-
-    if let Some(tls_acceptor) = tls_acceptor {
-        let listener = listener
-            .and_then(|s| tls_acceptor.accept(s).err_into())
-            .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
-        pin_mut!(listener);
-        // TODO: Look into take_until for this
-        rt.block_on(select(interval, listener)).factor_first().0
-    } else {
-        let listener = listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
-        pin_mut!(listener);
-        rt.block_on(select(interval, listener)).factor_first().0
     }
+    .and_then(|s| async {
+        let writer = if let Some(ref tls_acceptor) = tls_acceptor {
+            Either::Left(tls_acceptor.accept(s).await?.compat_write())
+        } else {
+            Either::Right(s.compat_write())
+        };
+        Ok(writer)
+    });
+
+    let listener = listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
+    pin_mut!(listener);
+    rt.block_on(select(interval, listener)).factor_first().0
 }
