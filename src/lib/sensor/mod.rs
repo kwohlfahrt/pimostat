@@ -5,7 +5,7 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-use futures::future::{pending, ready, select, Either, FutureExt, TryFutureExt};
+use futures::future::{pending, ready, select, Either, TryFutureExt};
 use futures::pin_mut;
 use futures::stream::{StreamExt, TryStreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
@@ -52,9 +52,9 @@ pub fn run(
             ))
         })
         .transpose()?;
-    let termination = termination
-        .map(|rx| Either::Right(rx.or_else(|_| pending())))
-        .unwrap_or(Either::Left(pending()));
+    let termination = termination.map_or(Either::Left(pending()), |rx| {
+        Either::Right(rx.or_else(|_| pending::<Result<_, Error>>()))
+    });
 
     let rt = runtime::Builder::new_current_thread()
         .enable_io()
@@ -72,6 +72,7 @@ pub fn run(
                 source.seek(SeekFrom::Start(0))?;
                 Ok(parse(&mut source)?)
             })
+            .take_until(termination)
             .try_for_each(|value| ready(tx.send(value)).err_into())
     };
 
@@ -87,12 +88,10 @@ pub fn run(
             .try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
         pin_mut!(listener);
         // TODO: Look into take_until for this
-        let interval = select(interval, termination).map(|e| e.factor_first().0);
         rt.block_on(select(interval, listener)).factor_first().0
     } else {
         let listener = listener.try_for_each_concurrent(None, |s| handle_connection(s, rx.clone()));
         pin_mut!(listener);
-        let interval = select(interval, termination).map(|e| e.factor_first().0);
         rt.block_on(select(interval, listener)).factor_first().0
     }
 }
