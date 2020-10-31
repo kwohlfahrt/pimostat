@@ -10,9 +10,11 @@ in rustPlatform.buildRustPackage rec {
   version = "0.1.0";
 
   src = ./.;
-  nativeBuildInputs = [ capnproto openssl pkgconfig ];
+  buildInputs = [ openssl ];
+  nativeBuildInputs = [ capnproto pkgconfig ];
+  checkInputs = [ openssl.bin ];
 
-  cargoSha256 = "0hy99n8a03whmx6385yx2caz1g7vp4hp3xkkj0qlwylcd5paf186";
+  cargoSha256 = "087hn84j8kaljdnmpi619pm9f646ihy3kylv16iq530jp39r52js";
 
   preCheck = ''
     (cd ./tests/ssl/ && ${bash}/bin/bash ./gen_certs.sh)
