@@ -1,4 +1,4 @@
-{ stdenv, makeRustPlatform, rustChannels, capnproto, openssl, pkgconfig, bash }:
+{ stdenv, lib, makeRustPlatform, rustChannels, capnproto, openssl, pkgconfig, bash }:
 
 let
   rustPlatform = with rustChannels.stable; makeRustPlatform {
@@ -20,7 +20,7 @@ in rustPlatform.buildRustPackage rec {
     (cd ./tests/ssl/ && ${bash}/bin/bash ./gen_certs.sh)
   '';
 
-  meta = with stdenv.lib; {
+  meta = with lib; {
     platforms = platforms.all;
   };
 }
