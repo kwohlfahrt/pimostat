@@ -7,9 +7,11 @@ use futures::future::select;
 use futures::pin_mut;
 use futures::{StreamExt, TryFuture, TryFutureExt, TryStream, TryStreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
+use tokio::net::TcpListener;
 use tokio::runtime;
 use tokio::sync::watch;
-use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
+use tokio_stream::wrappers::TcpListenerStream;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::error::Error;
 use crate::socket::listen_on;
@@ -44,12 +46,10 @@ where
             let mut reader = reader.compat();
             let mut rx = rx.clone();
 
-            if let Some(msg) = read_message(&mut reader, Default::default()).await? {
-                msg.get_root::<controller_capnp::hello::Reader>()?
-                    .get_type()?;
-            } else {
-                return Ok(());
-            }
+            read_message(&mut reader, Default::default())
+                .await?
+                .get_root::<controller_capnp::hello::Reader>()?
+                .get_type()?;
 
             let network = capnp_rpc::twoparty::VatNetwork::new(
                 reader,
@@ -130,7 +130,7 @@ pub fn run(
     let listener = listen_on(address)?;
     let listener = {
         let _guard = rt.enter();
-        tokio::net::TcpListener::from_std(listener)?
+        TcpListenerStream::new(TcpListener::from_std(listener)?)
             .err_into()
             .inspect_ok(|s| {
                 if let Err(e) = s.set_nodelay(true) {

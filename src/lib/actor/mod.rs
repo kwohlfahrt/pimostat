@@ -5,7 +5,7 @@ use capnp_rpc::pry;
 use futures::TryFutureExt;
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::runtime;
-use tokio_util::compat::{Tokio02AsyncReadCompatExt, Tokio02AsyncWriteCompatExt};
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 mod file;
 mod gpio;

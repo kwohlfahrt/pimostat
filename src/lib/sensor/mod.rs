@@ -9,9 +9,12 @@ use futures::future::{pending, ready, select, Either, TryFutureExt};
 use futures::io::AsyncWrite;
 use futures::pin_mut;
 use futures::stream::{StreamExt, TryStreamExt};
+use tokio::net::TcpListener;
 use tokio::runtime;
 use tokio::sync::{oneshot, watch};
-use tokio_util::compat::Tokio02AsyncWriteCompatExt;
+use tokio_stream::wrappers::IntervalStream;
+use tokio_stream::wrappers::TcpListenerStream;
+use tokio_util::compat::TokioAsyncWriteCompatExt;
 
 use crate::error::Error;
 use crate::sensor_capnp;
@@ -64,7 +67,7 @@ pub fn run(
 
     let interval = {
         let _guard = rt.enter();
-        tokio::time::interval(Duration::from_secs(interval as u64))
+        IntervalStream::new(tokio::time::interval(Duration::from_secs(interval as u64)))
             .map(move |_| {
                 source.seek(SeekFrom::Start(0))?;
                 Ok(parse(&mut source)?)
@@ -76,7 +79,7 @@ pub fn run(
     let listener = listen_on(address)?;
     let listener = {
         let _guard = rt.enter();
-        tokio::net::TcpListener::from_std(listener)?.err_into()
+        TcpListenerStream::new(TcpListener::from_std(listener)?).err_into()
     }
     .and_then(|s| async {
         let writer = if let Some(ref tls_acceptor) = tls_acceptor {
