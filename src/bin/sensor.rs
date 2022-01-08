@@ -25,5 +25,5 @@ fn main() -> Result<(), Error> {
     let args = Args::parse();
     let address = args.address.as_ref().map(|a| split_host_port(a));
 
-    run(address, args.certificate.as_ref(), &args.source, args.interval, None)
+    run(address, args.certificate.as_deref(), &args.source, args.interval, None)
 }

@@ -30,7 +30,7 @@ fn main() -> Result<(), Error> {
 
     run(
         address,
-        args.certificate.as_ref(),
+        args.certificate.as_deref(),
         split_host_port(&args.sensor),
         args.no_tls,
         args.temperature,

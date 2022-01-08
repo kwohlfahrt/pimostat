@@ -2,7 +2,7 @@ pub mod parse;
 
 use std::fs::{read, File};
 use std::io::{BufReader, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::Path;
 use std::time::Duration;
 
 use futures::future::{pending, ready, select, Either, TryFutureExt};
@@ -39,8 +39,8 @@ async fn handle_connection<W: AsyncWrite + Unpin>(
 
 pub fn run(
     address: Option<(&str, u16)>,
-    cert: Option<&PathBuf>,
-    source: &PathBuf,
+    cert: Option<&Path>,
+    source: &Path,
     interval: u32,
     termination: Option<oneshot::Receiver<()>>,
 ) -> Result<(), Error> {
