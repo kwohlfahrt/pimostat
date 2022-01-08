@@ -7,12 +7,13 @@
     naersk.inputs.nixpkgs.follows = "nixpkgs";
   };
 
+  # adapted from https://hoverbear.org/blog/a-flake-for-your-crate/#flake-nix
   outputs = { self, nixpkgs, naersk } : let
     systems = [ "x86_64-linux" "aarch64-linux" ];
     forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
 
-    pimostat = { naersk-lib, lib, capnproto, openssl, pkgconfig, bash }:
-    naersk-lib.buildPackage rec {
+    pimostat = { naersk, lib, capnproto, openssl, pkgconfig, bash, targetPlatform }:
+    naersk.lib."${targetPlatform.system}".buildPackage rec {
       pname = "pimostat";
       root = ./.;
       buildInputs = [ openssl ];
@@ -29,9 +30,10 @@
       };
     };
   in {
-    defaultPackage = forAllSystems (system: nixpkgs.legacyPackages.${system}.callPackage pimostat {
-      naersk-lib = naersk.lib."${system}";
-    });
+    defaultPackage = forAllSystems (system: (import nixpkgs { inherit system; overlays = [ self.overlay ]; }).pimostat);
+    overlay = self: super: {
+      pimostat = self.callPackage pimostat { inherit naersk; };
+    };
     nixosModule = import ./module.nix;
   };
 }
