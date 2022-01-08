@@ -11,7 +11,7 @@ fn main() -> Result<(), Error> {
         .arg(
             Arg::with_name("interval")
                 .long("interval")
-                .short("i")
+                .short('i')
                 .takes_value(true),
         )
         .arg(Arg::with_name("certificate").long("cert").takes_value(true))

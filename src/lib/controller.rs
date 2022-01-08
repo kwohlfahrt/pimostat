@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::read;
-use std::path::Path;
+use std::path::PathBuf;
 
 use capnp_futures::serialize::read_message;
 use futures::future::select;
@@ -95,7 +95,7 @@ where
 
 pub fn run(
     address: Option<(&str, u16)>,
-    cert: Option<&Path>,
+    cert: Option<&PathBuf>,
     sensor: (&str, u16),
     tls: bool,
     target: f32,

@@ -1,46 +1,39 @@
-use std::path::Path;
+use std::path::PathBuf;
 
-use clap::{App, Arg};
+use clap::Parser;
 
 use pimostat::controller::run;
 use pimostat::error::Error;
 use pimostat::util::split_host_port;
 
-fn main() -> Result<(), Error> {
-    let matches = App::new("Temperature Controller")
-        .arg(Arg::with_name("no-tls").long("no-tls"))
-        .arg(
-            Arg::with_name("hysteresis")
-                .long("hysteresis")
-                .short("h")
-                .takes_value(true),
-        )
-        .arg(Arg::with_name("certificate").long("cert").takes_value(true))
-        .arg(Arg::with_name("sensor").required(true))
-        .arg(Arg::with_name("temperature").required(true))
-        .arg(Arg::with_name("address"))
-        .get_matches();
+#[derive(Parser, Debug)]
+#[clap(about, version, author)]
+struct Args {
+    // TODO: Parse sensor/address with clap
+    sensor: String,
+    temperature: f32,
+    address: Option<String>,
 
-    let target: f32 = matches
-        .value_of("temperature")
-        .unwrap()
-        .parse()
-        .expect("Invalid temperature");
-    let hysteresis: f32 = matches
-        .value_of("hysteresis")
-        .unwrap_or("1.5")
-        .parse()
-        .expect("Invalid hysteresis");
-    let address = matches.value_of("address").map(split_host_port);
-    let sensor = matches.value_of("sensor").map(split_host_port).unwrap();
-    let cert = matches.value_of("certificate").map(Path::new);
+    #[clap(short, long, default_value_t = 1.5)]
+    hysteresis: f32,
+
+    #[clap(short, long, parse(from_os_str))]
+    certificate: Option<PathBuf>,
+
+    #[clap(short, long)]
+    no_tls: bool,
+}
+
+fn main() -> Result<(), Error> {
+    let args = Args::parse();
+    let address = args.address.as_ref().map(|a| split_host_port(a));
 
     run(
         address,
-        cert,
-        sensor,
-        !matches.is_present("no-tls"),
-        target,
-        hysteresis,
+        args.certificate.as_ref(),
+        split_host_port(&args.sensor),
+        args.no_tls,
+        args.temperature,
+        args.hysteresis,
     )
 }
