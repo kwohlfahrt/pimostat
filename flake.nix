@@ -4,6 +4,7 @@
   inputs = {
     nixpkgs.url = "nixpkgs";
     naersk.url = "github:nix-community/naersk";
+    naersk.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = { self, nixpkgs, naersk } : let
