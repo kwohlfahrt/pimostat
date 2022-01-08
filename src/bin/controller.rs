@@ -20,7 +20,7 @@ struct Args {
     #[clap(short, long, parse(from_os_str))]
     certificate: Option<PathBuf>,
 
-    #[clap(short, long)]
+    #[clap(long)]
     no_tls: bool,
 }
 

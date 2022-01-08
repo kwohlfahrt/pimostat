@@ -1,32 +1,29 @@
-use std::path::Path;
 
-use clap::{App, Arg};
+use std::path::PathBuf;
+
+use clap::Parser;
 
 use pimostat::error::Error;
 use pimostat::sensor::run;
 use pimostat::util::split_host_port;
 
+#[derive(Parser, Debug)]
+#[clap(about, version, author)]
+struct Args {
+    source: PathBuf,
+    address: Option<String>, //TODO: Parse address with clap
+
+    #[clap(short, long, default_value_t = 60)]
+    interval: u32,
+
+    #[clap(short, long, parse(from_os_str))]
+    certificate: Option<PathBuf>,
+}
+
+
 fn main() -> Result<(), Error> {
-    let matches = App::new("Thermostat Sensor")
-        .arg(
-            Arg::with_name("interval")
-                .long("interval")
-                .short('i')
-                .takes_value(true),
-        )
-        .arg(Arg::with_name("certificate").long("cert").takes_value(true))
-        .arg(Arg::with_name("source").required(true))
-        .arg(Arg::with_name("address"))
-        .get_matches();
+    let args = Args::parse();
+    let address = args.address.as_ref().map(|a| split_host_port(a));
 
-    let address = matches.value_of("address").map(split_host_port);
-    let cert = matches.value_of("certificate").map(Path::new);
-    let interval: u32 = matches
-        .value_of("interval")
-        .unwrap_or("60")
-        .parse()
-        .expect("Invalid interval");
-    let source = matches.value_of("source").unwrap();
-
-    run(address, cert, source.as_ref(), interval, None)
+    run(address, args.certificate.as_ref(), &args.source, args.interval, None)
 }
