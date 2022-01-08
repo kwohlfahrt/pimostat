@@ -31,6 +31,7 @@
     defaultPackage = forAllSystems (system: nixpkgs.legacyPackages.${system}.callPackage pimostat {
       naersk-lib = naersk.lib."${system}";
     });
+    nixosModule = import ./module.nix;
   };
 }
 
